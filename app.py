@@ -45,7 +45,7 @@ def extract_invoice_data(file_bytes, file_type, api_key):
     genai.configure(api_key=api_key)
     
     # Fallback list for active model versions
-    model_candidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    model_candidates = ['gemini-3.6-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
     model = None
     
     for model_name in model_candidates:
