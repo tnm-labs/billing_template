@@ -118,11 +118,11 @@ const FIELD_NOTES = [
 
 function buildPrompt(text) {
   const shape = "{" + DERIVABLE_KEYS.map((k) => '"' + k + '": string').join(", ") + "}";
-  return "You are extracting data from a Flipkart Marketplace (FKMP) tax invoice / TyresNmore billing invoice PDF. TyresNmore is an automotive tyre and accessories seller on Flipkart. The text below was extracted from the PDF and may have irregular spacing or line breaks — use context to interpret it.\n\n"
-    + "Reply with ONLY a JSON object (no markdown fences, no other text) with exactly these keys, every value a string:\n"
+  return "You are extracting data from a marketplace order tax invoice PDF for TyresNmore, an automotive tyre and accessories seller. The invoice may come from Flipkart, Amazon, or another marketplace — the field names below use Flipkart-era terminology (e.g. \"FSN\") for historical reasons, but treat the equivalent field on any marketplace's invoice the same way (e.g. Amazon's ASIN counts as fsnDetails, Amazon's order ID counts as crmOrderId and orderDate is whatever order date the invoice prints, not specifically a 'Flipkart' one). The text below was extracted from the PDF and may have irregular spacing or line breaks — use context to interpret it.\n\n"
+    + "Reply with ONLY a single JSON object and absolutely nothing else — no markdown code fences, no explanation before or after, no trailing commentary. The response must start with { and end with }. It must have exactly these keys, every value a string:\n"
     + shape + "\n\n"
     + "Field notes:\n- " + FIELD_NOTES + "\n\n"
-    + "Rules: use an empty string \"\" for anything you cannot find in the text — never guess or invent a value. Copy amounts and dates exactly as printed, except tnmBillingInvoiceDate which should be reformatted to mm/dd/yy.\n\n"
+    + "Rules: use an empty string \"\" for anything you cannot find in the text — never guess or invent a value, and never omit a key. Keep every value short (copy amounts and dates exactly as printed, except tnmBillingInvoiceDate which should be reformatted to mm/dd/yy) — do not include explanations inside values.\n\n"
     + "Document text:\n<<<\n" + text.slice(0, 11000) + "\n>>>";
 }
 
@@ -242,12 +242,14 @@ async function uploadPdfToDrive(buffer, filename) {
   const file = await driveClient.files.create({
     requestBody: { name: filename || "invoice.pdf", parents: folderId ? [folderId] : undefined },
     media: { mimeType: "application/pdf", body: Readable.from(buffer) },
-    fields: "id, webViewLink"
+    fields: "id, webViewLink",
+    supportsAllDrives: true
   });
   try {
     await driveClient.permissions.create({
       fileId: file.data.id,
-      requestBody: { role: "reader", type: "anyone" }
+      requestBody: { role: "reader", type: "anyone" },
+      supportsAllDrives: true
     });
   } catch (e) {
     console.warn("Couldn't set link-sharing on the Drive file (your Workspace's sharing policy may block it) — the file is still stored:", e.message);
@@ -269,16 +271,23 @@ app.post("/api/extract", async (req, res) => {
   try {
     const msg = await anthropic.messages.create({
       model,
-      max_tokens: 1200,
+      max_tokens: 2200,
       messages: [{ role: "user", content: buildPrompt(text) }]
     });
     const raw = (msg.content || []).map((b) => (b.type === "text" ? b.text : "")).join("");
+    if (msg.stop_reason === "max_tokens") {
+      console.error("extract: response was truncated at max_tokens — raw so far:", raw.slice(0, 800));
+    }
     const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return res.status(502).json({ error: "invalid_json", raw });
+    if (!match) {
+      console.error("extract: no JSON object found in model response (stop_reason=" + msg.stop_reason + "):", raw.slice(0, 800));
+      return res.status(502).json({ error: "invalid_json", raw });
+    }
     let data;
     try {
       data = JSON.parse(match[0]);
     } catch (e) {
+      console.error("extract: JSON.parse failed:", e.message, "raw:", raw.slice(0, 800));
       return res.status(502).json({ error: "invalid_json", raw });
     }
     res.json({ data });
