@@ -1,0 +1,20 @@
+{
+  "name": "tnm-billing-template-server",
+  "version": "2.0.0",
+  "private": true,
+  "description": "TnM Billing Template — upload marketplace order invoice PDFs, auto-fill 42 billing fields via the Anthropic API, sync each row into a shared Google Sheet, and store the original PDF in Google Drive. No account needed for the people using the link.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "googleapis": "^144.0.0",
+    "multer": "^2.0.0"
+  }
+}

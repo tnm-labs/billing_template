@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TnM Billing Template</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#F1F3F6; --surface:#FFFFFF; --surface-2:#E7EAEF; --surface-3:#DCE0E6; --border:#D6DBE2;
+    --text:#161A20; --text-muted:#5B6472;
+    --accent:#B85E0C; --accent-hover:#9B4E09; --accent-contrast:#FFFFFF; --accent-soft:#F6E4C9;
+    --steel:#35495C; --steel-soft:#E3E8ED; --steel-text:#22303D;
+    --success:#26794F; --success-soft:#DBF0E2;
+    --warning:#93630F; --warning-soft:#FBEAD1;
+    --danger:#B23A26; --danger-soft:#FBE1DB;
+    --sales:#2A5C8A; --sales-soft:#E1EBF5;
+    --accounts:#6A4A9C; --accounts-soft:#EAE3F5;
+    --ops:#1E7A6F; --ops-soft:#DEF0EC;
+    --mp:#9C4A6A; --mp-soft:#F5E1EA;
+    --font-display:'Archivo', ui-sans-serif, system-ui, sans-serif;
+    --font-body:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#13171C; --surface:#1B2027; --surface-2:#232933; --surface-3:#2B323D; --border:#333B46;
+      --text:#ECEEF1; --text-muted:#9BA5B2;
+      --accent:#E38A34; --accent-hover:#F2984A; --accent-contrast:#14181D; --accent-soft:#3A2A15;
+      --steel:#8FA5B8; --steel-soft:#242C35; --steel-text:#CBD8E3;
+      --success:#4FAE7C; --success-soft:#183226;
+      --warning:#D9A441; --warning-soft:#332609;
+      --danger:#E27462; --danger-soft:#3A1D17;
+      --sales:#7CAEDE; --sales-soft:#1C2A38;
+      --accounts:#B79AE0; --accounts-soft:#2A2338;
+      --ops:#6FC9BB; --ops-soft:#182E2A;
+      --mp:#E0A0BC; --mp-soft:#331F28;
+    }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{ background:var(--bg); color:var(--text); font-family:var(--font-body); padding-inline:20px; padding-block:24px 40px; }
+  h1,h2,h3{ font-family:var(--font-display); letter-spacing:-0.01em; margin:0; }
+  button{ font-family:inherit; }
+  input, textarea{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; } }
+  [hidden]{ display:none !important; }
+
+  .wrap{ max-width:1360px; margin-inline:auto; display:flex; flex-direction:column; gap:20px; }
+
+  .masthead{ background:var(--steel); border-radius:14px; padding:22px 26px; display:flex; flex-direction:column; gap:6px; color:#fff; }
+  .masthead .eyebrow{ font-family:var(--font-mono); font-size:12px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; }
+  .masthead h1{ font-size:26px; color:#fff; }
+  .masthead p{ margin:0; font-size:14px; color:rgba(255,255,255,0.78); max-width:74ch; }
+  .masthead .badge{ display:inline-flex; align-self:flex-start; margin-top:2px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; background:rgba(255,255,255,0.14); padding:3px 10px; border-radius:99px; }
+
+  .legend{ display:flex; flex-wrap:wrap; gap:8px 16px; font-size:12px; color:var(--text-muted); align-items:center; }
+  .legend .sw{ display:inline-flex; align-items:center; gap:5px; }
+  .legend .dot{ width:9px; height:9px; border-radius:3px; }
+
+  .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  .stat{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+  .stat .n{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:22px; font-weight:600; }
+  .stat .l{ font-size:12px; color:var(--text-muted); }
+
+  .banner{ border:1px solid var(--warning); background:var(--warning-soft); color:var(--warning); border-radius:10px; padding:10px 14px; font-size:13px; display:none; align-items:flex-start; gap:8px; }
+  .banner.show{ display:flex; }
+
+  .dropzone{ border:2px dashed var(--border); border-radius:14px; background:var(--surface); padding:26px 20px; display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent); background:var(--accent-soft); }
+  .dropzone .ic{ width:34px; height:34px; color:var(--accent); }
+  .dropzone strong{ font-size:14.5px; }
+  .dropzone span{ font-size:12.5px; color:var(--text-muted); }
+  .dropzone input{ display:none; }
+
+  .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+  .toolbar .left{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .btn{ border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:8px; padding:8px 13px; font-size:13px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover{ background:var(--surface-2); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-contrast); font-weight:600; }
+  .btn.primary:hover{ background:var(--accent-hover); }
+  .btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+  .table-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .table-scroll{ overflow-x:auto; max-height:72vh; overflow-y:auto; }
+  table{ border-collapse:collapse; font-size:12.5px; }
+  thead th{ position:sticky; background:var(--steel-soft); color:var(--steel-text); text-align:left; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; padding:8px 9px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); white-space:nowrap; }
+  thead tr.grp th{ top:0; font-size:10px; z-index:2; }
+  thead tr.grp th.team-Sales{ background:var(--sales-soft); color:var(--sales); }
+  thead tr.grp th.team-Accounts{ background:var(--accounts-soft); color:var(--accounts); }
+  thead tr.grp th.team-OPS{ background:var(--ops-soft); color:var(--ops); }
+  thead tr.grp th.team-MPTeam{ background:var(--mp-soft); color:var(--mp); }
+  thead tr.grp th.team-{ background:var(--surface-3); color:var(--steel-text); }
+  thead tr.fld th{ top:var(--head1-h, 31px); z-index:1; }
+  tbody td{ padding:5px 8px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); vertical-align:middle; }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr.example{ opacity:0.62; }
+  tbody tr:hover{ background:var(--surface-2); }
+  td input{ width:100%; min-width:100%; border:1px solid transparent; background:transparent; color:var(--text); font-size:12.5px; padding:5px 6px; border-radius:6px; }
+  td input:hover{ border-color:var(--border); }
+  td input:focus{ border-color:var(--accent); background:var(--surface); outline:none; }
+  td.num input, td.mono input{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+  td.file{ max-width:180px; }
+  .filename{ display:flex; align-items:center; gap:6px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .filename svg{ flex:none; width:14px; height:14px; color:var(--text-muted); }
+  a.filelink{ color:var(--accent); text-decoration:none; font-weight:600; }
+  a.filelink:hover{ text-decoration:underline; }
+
+  .chip{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+  .chip.example{ background:var(--surface-2); color:var(--text-muted); }
+  .chip.busy{ background:var(--accent-soft); color:var(--accent); }
+  .chip.ok{ background:var(--success-soft); color:var(--success); }
+  .chip.manual{ background:var(--steel-soft); color:var(--steel-text); }
+  .chip.err{ background:var(--danger-soft); color:var(--danger); }
+  .spin{ width:9px; height:9px; border-radius:50%; border:1.5px solid currentColor; border-top-color:transparent; animation:spin .7s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .syncline{ font-size:10px; color:var(--text-muted); margin-top:3px; white-space:nowrap; }
+  .syncline.ok{ color:var(--success); }
+  .syncline.err{ color:var(--danger); }
+
+  .iconbtn{ border:none; background:transparent; color:var(--text-muted); width:24px; height:24px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .iconbtn:hover{ background:var(--surface-2); color:var(--text); }
+  .iconbtn.danger:hover{ background:var(--danger-soft); color:var(--danger); }
+
+  .detail td{ background:var(--surface-2); padding:0 10px 12px 10px; border-right:none; }
+  .detail pre{ margin:0; max-height:160px; overflow:auto; font-family:var(--font-mono); font-size:11.5px; line-height:1.5; white-space:pre-wrap; color:var(--text-muted); background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; }
+  .detail .cap{ font-size:11px; color:var(--text-muted); margin:8px 0 4px; }
+  .errmsg{ font-size:11px; color:var(--danger); margin-top:2px; }
+  .retry{ font-size:11px; color:var(--accent); background:none; border:none; cursor:pointer; padding:0; font-weight:600; text-decoration:underline; }
+  .srcbtn{ font-size:11px; color:var(--text-muted); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; }
+
+  footer{ text-align:center; font-size:11.5px; color:var(--text-muted); padding-top:4px; }
+  .hint{ font-size:12px; color:var(--text-muted); }
+
+  /* Passcode gate */
+  .gate{ position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; }
+  .gate-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; max-width:360px; width:100%; display:flex; flex-direction:column; gap:12px; }
+  .gate-card h2{ font-size:18px; }
+  .gate-card p{ margin:0; font-size:13px; color:var(--text-muted); }
+  .gate-card input{ border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:14px; background:var(--bg); color:var(--text); }
+  .gate-card .err{ font-size:12.5px; color:var(--danger); min-height:16px; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <h2>TnM Billing Template</h2>
+    <p>Enter the team passcode to continue.</p>
+    <input type="password" id="gateInput" placeholder="Passcode" autocomplete="off">
+    <div class="err" id="gateErr"></div>
+    <button class="btn primary" id="gateBtn" type="button">Continue</button>
+  </div>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <div class="masthead">
+    <div class="eyebrow">TyresNmore &middot; Sales &middot; OPS &middot; Accounts</div>
+    <h1>TnM Billing Template</h1>
+    <p>Drop in a marketplace order invoice PDF. Fields the invoice can answer are filled in automatically; everything else stays blank for the owning team to fill in. Every row saves straight into the shared Google Sheet, with the original PDF attached for anyone who needs to open it.</p>
+    <span class="badge" id="statusBadge">No account needed &middot; syncing to Google Sheet</span>
+  </div>
+
+  <div class="legend">
+    <span class="sw"><span class="dot" style="background:var(--sales)"></span>Sales</span>
+    <span class="sw"><span class="dot" style="background:var(--ops)"></span>OPS</span>
+    <span class="sw"><span class="dot" style="background:var(--accounts)"></span>Accounts</span>
+    <span class="sw"><span class="dot" style="background:var(--mp)"></span>MP Team</span>
+    <span>&mdash; column colors show which team usually owns that field (first pass, correct as needed).</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="statUploaded">0</div><div class="l">Invoices uploaded</div></div>
+    <div class="stat"><div class="n" id="statAuto">0</div><div class="l">Auto-extracted</div></div>
+    <div class="stat"><div class="n" id="statReview">0</div><div class="l">Needs review</div></div>
+    <div class="stat"><div class="n" id="statSynced">0</div><div class="l">Synced to Sheet</div></div>
+  </div>
+
+  <div class="banner" id="aiBanner"><span id="aiBannerText"></span></div>
+
+  <label class="dropzone" id="dropzone" for="fileInput">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <strong>Drop invoice PDFs here, or click to browse</strong>
+    <span>PDFs, or a .zip of PDFs (e.g. an Amazon bulk invoice download) &middot; each PDF is stored and linked, its text is used to auto-fill fields</span>
+    <input type="file" id="fileInput" accept="application/pdf,.zip,application/zip" multiple>
+  </label>
+
+  <div class="toolbar">
+    <div class="left">
+      <button class="btn" id="addRowBtn" type="button">+ Add row manually</button>
+      <button class="btn" id="clearExamplesBtn" type="button" hidden>Clear example rows</button>
+      <span class="hint">42 fields &middot; scroll the table sideways to see them all</span>
+    </div>
+    <button class="btn primary" id="exportBtn" type="button" disabled>Export to Excel (backup copy)</button>
+  </div>
+
+  <div class="table-card">
+    <div class="table-scroll">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Each row saves automatically to the shared Google Sheet as fields change. PDFs are stored so anyone can open the original from the Sheet or from this page. Review auto-filled values before relying on them.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+  }
+
+  // Mirrors the COLUMNS array in server.js — keep the two in sync.
+  var COLUMNS = [
+    { key:"orderId",               label:"Order Id",                                team:"Sales",    cls:"mono", w:14 },
+    { key:"costCenter",            label:"Cost Center",                             team:"Accounts", cls:"",     w:14 },
+    { key:"salesLedger",           label:"Sales Ledger",                            team:"Accounts", cls:"",     w:16 },
+    { key:"voucherType",           label:"Voucher Type",                            team:"Accounts", cls:"",     w:14 },
+    { key:"salesmanName",          label:"salesman name",                           team:"Sales",    cls:"",     w:18 },
+    { key:"leadSource",            label:"Lead Source",                             team:"Sales",    cls:"",     w:16 },
+    { key:"crmOrderId",            label:"CRM Order id",                            team:"MP Team",  cls:"mono", w:20 },
+    { key:"costPrice",             label:"Cost Price",                              team:"Accounts", cls:"num",  w:12 },
+    { key:"supplierName",          label:"Supplier name",                           team:"Sales",    cls:"",     w:20 },
+    { key:"dispatchedThrough",     label:"Dispatched through",                      team:"OPS",      cls:"",     w:16 },
+    { key:"billingCity",           label:"Billing City",                            team:"Sales",    cls:"",     w:14 },
+    { key:"fsnDetails",            label:"FSN Details for Creatives - Tyresnmore.", team:"Sales",    cls:"mono", w:20 },
+    { key:"product",               label:"Product",                                 team:"Sales",    cls:"",     w:26 },
+    { key:"hasOffer",              label:"HAS OFFER",                               team:"Sales",    cls:"",     w:10 },
+    { key:"tnmDiscount",           label:"TNM Discount",                            team:"Sales",    cls:"num",  w:12 },
+    { key:"orderDate",             label:"Order Date",                              team:"Sales",    cls:"mono", w:12 },
+    { key:"skuCode",               label:"SKU Code",                                team:"Sales",    cls:"mono", w:20 },
+    { key:"quantity",              label:"Quantity",                                team:"Sales",    cls:"num",  w:8  },
+    { key:"totalInvoiceAmount",    label:"Total invoice Amount",                    team:"Sales",    cls:"num",  w:14 },
+    { key:"sellingPricePerItem",   label:"Selling Price Per Item",                  team:"Sales",    cls:"num",  w:14 },
+    { key:"preGstPrice",           label:"Pre GST Price",                           team:"Sales",    cls:"num",  w:12 },
+    { key:"shippingChargePerItem", label:"Shipping Charge per item",                team:"Sales",    cls:"num",  w:14 },
+    { key:"totalInclFkmp",         label:"Total (includes FKMP contribution)",      team:"Sales",    cls:"num",  w:16 },
+    { key:"invoiceNo",             label:"Invoice No.",                             team:"Sales",    cls:"mono", w:16 },
+    { key:"invoiceAmount",         label:"Invoice Amount",                          team:"Accounts", cls:"num",  w:12 },
+    { key:"tnmBillingInvoiceDate", label:"TNM Billing Invoice Date (mm/dd/yy)",     team:"Accounts", cls:"mono", w:14 },
+    { key:"taxLedgerCgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
+    { key:"cgst",                  label:"CGST",                                    team:"Accounts", cls:"num",  w:10 },
+    { key:"taxLedgerSgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
+    { key:"sgst",                  label:"SGST",                                    team:"Accounts", cls:"num",  w:10 },
+    { key:"taxLedgerIgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
+    { key:"igst",                  label:"IGST",                                    team:"Accounts", cls:"num",  w:10 },
+    { key:"buyerName",             label:"Buyer name",                              team:"Sales",    cls:"",     w:20 },
+    { key:"shipToName",            label:"Ship to name",                           team:"Sales",    cls:"",     w:20 },
+    { key:"addressLine1",          label:"Address Line 1",                          team:"Sales",    cls:"",     w:28 },
+    { key:"addressLine2",          label:"Address Line 2",                          team:"Sales",    cls:"",     w:22 },
+    { key:"city",                  label:"City",                                    team:"Sales",    cls:"",     w:14 },
+    { key:"state",                 label:"State",                                   team:"Sales",    cls:"",     w:14 },
+    { key:"pinCode",               label:"PIN Code",                                team:"Sales",    cls:"mono", w:9  },
+    { key:"phoneNo",               label:"Phone No",                                team:"Sales",    cls:"mono", w:13 },
+    { key:"emailId",               label:"Email Id",                                team:"Sales",    cls:"mono", w:22 },
+    { key:"hsn",                   label:"HSN",                                     team:"Accounts", cls:"mono", w:9  }
+  ];
+  var FIELDS = COLUMNS.map(function(c){ return c.key; });
+  var META_COLS = 4;
+
+  var gate = document.getElementById("gate");
+  var gateInput = document.getElementById("gateInput");
+  var gateErr = document.getElementById("gateErr");
+  var gateBtn = document.getElementById("gateBtn");
+  var app = document.getElementById("app");
+
+  var thead = document.getElementById("thead");
+  var tbody = document.getElementById("tbody");
+  var addRowBtn = document.getElementById("addRowBtn");
+  var clearExamplesBtn = document.getElementById("clearExamplesBtn");
+  var exportBtn = document.getElementById("exportBtn");
+  var fileInput = document.getElementById("fileInput");
+  var dropzone = document.getElementById("dropzone");
+  var aiBanner = document.getElementById("aiBanner");
+  var aiBannerText = document.getElementById("aiBannerText");
+  var statusBadge = document.getElementById("statusBadge");
+
+  var statUploaded = document.getElementById("statUploaded");
+  var statAuto = document.getElementById("statAuto");
+  var statReview = document.getElementById("statReview");
+  var statSynced = document.getElementById("statSynced");
+
+  var rows = new Map();
+  var rowEls = new Map();
+  var seq = 0;
+  var uploadedCount = 0;
+  var accessCode = sessionStorage.getItem("tnm_access_code") || "";
+  var config = { requiresAccessCode: false, sheetsConfigured: false, driveConfigured: false };
+  var syncTimers = new Map();
+
+  function uid(){ seq += 1; return "r" + seq; }
+  function makeRowKey(){
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "rk-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  }
+  function esc(s){ return String(s == null ? "" : s); }
+  function chWidth(w){ return Math.max(70, Math.min(260, w * 7.2)); }
+  function teamClass(team){ return "team-" + String(team || "").replace(/\s+/g, ""); }
+  function svgFile(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5" stroke-linejoin="round"/></svg>';
+  }
+
+  function buildHead(){
+    var groups = [];
+    COLUMNS.forEach(function(c){
+      var last = groups[groups.length - 1];
+      if (last && last.name === c.team) { last.span += 1; }
+      else { groups.push({ name:c.team, span:1 }); }
+    });
+    var rowGrp = document.createElement("tr");
+    rowGrp.className = "grp";
+    rowGrp.appendChild(th("", { rowspan:2, style:"width:34px" }));
+    rowGrp.appendChild(th("Invoice file", { rowspan:2 }));
+    groups.forEach(function(g){ rowGrp.appendChild(th(g.name, { colspan:g.span, cls:teamClass(g.name) })); });
+    rowGrp.appendChild(th("Status", { rowspan:2 }));
+    rowGrp.appendChild(th("", { rowspan:2, style:"width:34px" }));
+
+    var rowFld = document.createElement("tr");
+    rowFld.className = "fld";
+    COLUMNS.forEach(function(c){ rowFld.appendChild(th(c.label, { style:"min-width:" + chWidth(c.w) + "px" })); });
+
+    thead.appendChild(rowGrp);
+    thead.appendChild(rowFld);
+    requestAnimationFrame(function(){
+      thead.style.setProperty("--head1-h", rowGrp.getBoundingClientRect().height + "px");
+    });
+  }
+  function th(text, opts){
+    opts = opts || {};
+    var el = document.createElement("th");
+    el.textContent = text;
+    if (opts.rowspan) el.rowSpan = opts.rowspan;
+    if (opts.colspan) el.colSpan = opts.colspan;
+    if (opts.style) el.setAttribute("style", opts.style);
+    if (opts.cls) el.className = opts.cls;
+    return el;
+  }
+
+  function refreshStats(){
+    var auto = 0, review = 0, synced = 0;
+    rows.forEach(function(r){
+      if (r.status === "example") return;
+      if (r.status === "extracted") auto += 1;
+      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading") review += 1;
+      if (r.syncState === "ok") synced += 1;
+    });
+    statUploaded.textContent = uploadedCount;
+    statAuto.textContent = auto;
+    statReview.textContent = review;
+    statSynced.textContent = synced;
+    exportBtn.disabled = rows.size === 0;
+  }
+
+  function setChip(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var map = {
+      example: ["chip example", "Example"],
+      reading: ["chip busy", '<span class="spin"></span> Reading PDF'],
+      extracting: ["chip busy", '<span class="spin"></span> Extracting'],
+      extracted: ["chip ok", "Extracted"],
+      manual: ["chip manual", "Manual entry"],
+      error: ["chip err", "Needs attention"]
+    };
+    var m = map[r.status] || map.manual;
+    el.statusChip.className = m[0];
+    el.statusChip.innerHTML = m[1];
+  }
+
+  function setSyncLine(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var map = {
+      idle: ["syncline", ""],
+      pending: ["syncline", "Saving to Sheet…"],
+      ok: ["syncline ok", "Synced to Sheet ✓"],
+      err: ["syncline err", "Sheet sync failed — will retry"],
+      off: ["syncline", "Sheet sync not set up"]
+    };
+    var m = map[r.syncState] || map.idle;
+    el.syncEl.className = m[0];
+    el.syncEl.textContent = m[1];
+  }
+
+  function applyFieldsToInputs(id, data){
+    var el = rowEls.get(id);
+    if (!el) return;
+    FIELDS.forEach(function(f){
+      if (data && typeof data[f] === "string" && data[f].trim() !== "") el.inputs[f].value = data[f];
+    });
+  }
+
+  function currentValues(id){
+    var el = rowEls.get(id);
+    var out = {};
+    FIELDS.forEach(function(f){ out[f] = el.inputs[f].value; });
+    return out;
+  }
+
+  function scheduleSync(id){
+    if (!config.sheetsConfigured) { var r = rows.get(id); if (r) { r.syncState = "off"; setSyncLine(id); } return; }
+    var existing = syncTimers.get(id);
+    if (existing) clearTimeout(existing);
+    var r = rows.get(id);
+    if (r) { r.syncState = "pending"; setSyncLine(id); }
+    syncTimers.set(id, setTimeout(function(){ syncNow(id); }, 1100));
+  }
+
+  async function syncNow(id){
+    var r = rows.get(id);
+    if (!r || r.status === "example") return;
+    r.syncState = "pending";
+    setSyncLine(id);
+    try {
+      var headers = { "Content-Type": "application/json" };
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res = await fetch("/api/sync-row", {
+        method: "POST", headers: headers,
+        body: JSON.stringify({ rowKey: r.rowKey, values: currentValues(id), fileLink: r.fileLink || "" })
+      });
+      if (!res.ok) throw new Error("http_" + res.status);
+      r.syncState = "ok";
+    } catch (e) {
+      r.syncState = "err";
+    }
+    setSyncLine(id);
+    refreshStats();
+  }
+
+  function buildRow(id, opts){
+    opts = opts || {};
+    var r = { id:id, rowKey: opts.rowKey || makeRowKey(), fileName: opts.fileName || "(manual row)", status: opts.status || "manual", rawText:"", fileLink: opts.fileLink || "", syncState: "idle" };
+    rows.set(id, r);
+
+    var tr = document.createElement("tr");
+    if (r.status === "example") tr.className = "example";
+
+    var tdToggle = document.createElement("td");
+    var srcBtn = document.createElement("button");
+    srcBtn.className = "srcbtn";
+    srcBtn.type = "button";
+    srcBtn.style.display = "none";
+    tdToggle.appendChild(srcBtn);
+    tr.appendChild(tdToggle);
+
+    var tdFile = document.createElement("td");
+    tdFile.className = "file";
+    tr.appendChild(tdFile);
+
+    var inputs = {};
+    COLUMNS.forEach(function(c){
+      var td = document.createElement("td");
+      if (c.cls) td.className = c.cls;
+      var input = document.createElement("input");
+      input.type = "text";
+      input.id = "f-" + c.key + "-" + id;
+      input.value = opts[c.key] || "";
+      input.autocomplete = "off";
+      input.style.minWidth = chWidth(c.w) + "px";
+      input.addEventListener("input", function(){ scheduleSync(id); });
+      td.appendChild(input);
+      tr.appendChild(td);
+      inputs[c.key] = input;
+    });
+
+    var tdStatus = document.createElement("td");
+    var chip = document.createElement("span");
+    var syncEl = document.createElement("div");
+    syncEl.className = "syncline";
+    tdStatus.appendChild(chip);
+    tdStatus.appendChild(syncEl);
+    tr.appendChild(tdStatus);
+
+    var tdRemove = document.createElement("td");
+    var rmBtn = document.createElement("button");
+    rmBtn.className = "iconbtn danger";
+    rmBtn.type = "button";
+    rmBtn.title = "Remove row";
+    rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/></svg>';
+    rmBtn.addEventListener("click", function(){ removeRow(id); });
+    tdRemove.appendChild(rmBtn);
+    tr.appendChild(tdRemove);
+
+    var detailTr = document.createElement("tr");
+    detailTr.className = "detail";
+    detailTr.hidden = true;
+    var detailTd = document.createElement("td");
+    detailTd.colSpan = COLUMNS.length + META_COLS;
+    var cap = document.createElement("div");
+    cap.className = "cap";
+    cap.textContent = "Text read from the PDF (for checking the fields above):";
+    var pre = document.createElement("pre");
+    detailTd.appendChild(cap);
+    detailTd.appendChild(pre);
+    var errDiv = document.createElement("div");
+    errDiv.className = "errmsg";
+    detailTd.appendChild(errDiv);
+    var retryBtn = document.createElement("button");
+    retryBtn.className = "retry";
+    retryBtn.type = "button";
+    retryBtn.textContent = "Retry extraction";
+    retryBtn.style.display = "none";
+    retryBtn.addEventListener("click", function(){ retryRow(id); });
+    detailTd.appendChild(retryBtn);
+    detailTr.appendChild(detailTd);
+
+    rowEls.set(id, { tr:tr, detailTr:detailTr, inputs:inputs, tdFile:tdFile, statusChip:chip, syncEl:syncEl, pre:pre, srcBtn:srcBtn, errDiv:errDiv, retryBtn:retryBtn });
+    renderFileCell(id);
+    setChip(id);
+    setSyncLine(id);
+    return { tr:tr, detailTr:detailTr };
+  }
+
+  function renderFileCell(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    if (r.fileLink) {
+      el.tdFile.innerHTML = '<a class="filelink" href="' + esc(r.fileLink) + '" target="_blank" rel="noopener">' + svgFile() + ' View PDF</a>';
+    } else {
+      el.tdFile.innerHTML = '<span class="filename">' + svgFile() + '<span title="' + esc(r.fileName) + '">' + esc(r.fileName) + "</span></span>";
+    }
+  }
+
+  function insertRow(id, opts){
+    var built = buildRow(id, opts);
+    tbody.appendChild(built.tr);
+    tbody.appendChild(built.detailTr);
+    refreshStats();
+  }
+  function removeRow(id){
+    var el = rowEls.get(id);
+    if (!el) return;
+    el.tr.remove(); el.detailTr.remove();
+    rowEls.delete(id); rows.delete(id);
+    var t = syncTimers.get(id); if (t) clearTimeout(t);
+    refreshStats();
+  }
+  function clearExamples(){
+    var toRemove = [];
+    rows.forEach(function(r, id){ if (r.status === "example") toRemove.push(id); });
+    toRemove.forEach(removeRow);
+    clearExamplesBtn.hidden = true;
+  }
+  function ensureExamplesCleared(){
+    var has = false;
+    rows.forEach(function(r){ if (r.status === "example") has = true; });
+    if (has) clearExamples();
+  }
+  function showSourceToggle(id){
+    var el = rowEls.get(id);
+    if (!el) return;
+    el.srcBtn.style.display = "inline";
+    el.srcBtn.textContent = "view text";
+    el.srcBtn.onclick = function(){
+      el.detailTr.hidden = !el.detailTr.hidden;
+      el.srcBtn.textContent = el.detailTr.hidden ? "view text" : "hide text";
+    };
+  }
+  function setError(id, msg, retryable){
+    var r = rows.get(id), el = rowEls.get(id);
+    r.status = "error";
+    setChip(id);
+    el.errDiv.textContent = msg;
+    el.retryBtn.style.display = retryable ? "inline" : "none";
+    el.detailTr.hidden = false;
+    showSourceToggle(id);
+    refreshStats();
+  }
+
+  async function extractPdfText(file){
+    var buf = await file.arrayBuffer();
+    var doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    var parts = [];
+    var pages = Math.min(doc.numPages, 8);
+    for (var i = 1; i <= pages; i++) {
+      var page = await doc.getPage(i);
+      var content = await page.getTextContent();
+      parts.push(content.items.map(function(it){ return it.str; }).join(" "));
+    }
+    return parts.join("\n\n");
+  }
+
+  async function callExtractApi(text){
+    var headers = { "Content-Type": "application/json" };
+    if (accessCode) headers["x-access-code"] = accessCode;
+    var res = await fetch("/api/extract", { method: "POST", headers: headers, body: JSON.stringify({ text: text.slice(0, 11000) }) });
+    var body = null;
+    try { body = await res.json(); } catch (e) { /* ignore */ }
+    if (!res.ok) {
+      var err = new Error((body && body.error) || ("http_" + res.status));
+      err.code = (body && body.error) || ("http_" + res.status);
+      throw err;
+    }
+    return body.data;
+  }
+
+  async function uploadFileToDrive(id, file){
+    if (!config.driveConfigured) return;
+    try {
+      var fd = new FormData();
+      fd.append("pdf", file, file.name);
+      var headers = {};
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res = await fetch("/api/upload-invoice-file", { method: "POST", headers: headers, body: fd });
+      var body = null;
+      try { body = await res.json(); } catch (e) { /* ignore */ }
+      if (!res.ok || !body || !body.link) return;
+      var r = rows.get(id);
+      if (!r) return;
+      r.fileLink = body.link;
+      renderFileCell(id);
+      scheduleSync(id);
+    } catch (e) { /* leave file unlinked; row still has its data */ }
+  }
+
+  async function processFile(file){
+    var id = uid();
+    uploadedCount += 1;
+    insertRow(id, { fileName: file.name, status: "reading" });
+    ensureExamplesCleared();
+    setChip(id);
+
+    uploadFileToDrive(id, file); // fire-and-forget; doesn't block field extraction
+
+    var r = rows.get(id), el = rowEls.get(id);
+    var text = "";
+    try {
+      text = await extractPdfText(file);
+    } catch (e) {
+      r.status = "manual";
+      setChip(id);
+      el.pre.textContent = "(couldn't read text from this PDF)";
+      el.errDiv.textContent = "Couldn't read this PDF automatically — enter its details manually.";
+      el.detailTr.hidden = false;
+      refreshStats();
+      return;
+    }
+    r.rawText = text;
+    el.pre.textContent = text.trim() ? text : "(no extractable text found in this PDF — it may be a scanned image)";
+    showSourceToggle(id);
+
+    await runExtraction(id, text);
+  }
+
+  async function runExtraction(id, text){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!config.aiConfigured) {
+      r.status = "manual";
+      setChip(id);
+      refreshStats();
+      return;
+    }
+    r.status = "extracting";
+    setChip(id);
+    refreshStats();
+    try {
+      var data = await callExtractApi(text);
+      applyFieldsToInputs(id, data);
+      r.status = "extracted";
+      setChip(id);
+      el.errDiv.textContent = "";
+      el.retryBtn.style.display = "none";
+      scheduleSync(id);
+    } catch (e) {
+      var code = e && e.code;
+      var msg = ({
+        rate_limited: "Rate limited — wait a moment and retry.",
+        server_not_configured: "The server isn't set up with an API key yet — enter fields manually for now.",
+        bad_access_code: "The passcode changed — reload the page and re-enter it.",
+        invalid_json: "Couldn't parse the extracted fields — try again or fill in manually.",
+        empty_text: "No text to extract — enter fields manually.",
+        upstream_error: "Extraction failed — try again or fill in manually."
+      })[code] || "Extraction failed — try again or fill in manually.";
+      setError(id, msg, code !== "bad_access_code" && code !== "server_not_configured");
+    }
+    refreshStats();
+  }
+
+  function retryRow(id){
+    var r = rows.get(id);
+    if (!r) return;
+    if (!r.rawText) { r.status = "manual"; setChip(id); refreshStats(); return; }
+    runExtraction(id, r.rawText);
+  }
+
+  function isPdfFile(f){ return f.type === "application/pdf" || /\.pdf$/i.test(f.name); }
+  function isZipFile(f){ return f.type === "application/zip" || f.type === "application/x-zip-compressed" || /\.zip$/i.test(f.name); }
+
+  async function extractPdfsFromZip(zipFile){
+    var out = [];
+    if (!window.JSZip) return out; // library failed to load; caller shows nothing rather than erroring
+    try {
+      var buf = await zipFile.arrayBuffer();
+      var zip = await JSZip.loadAsync(buf);
+      var entries = [];
+      zip.forEach(function(relPath, entry){
+        if (!entry.dir && /\.pdf$/i.test(entry.name) && !/^__MACOSX\//.test(entry.name)) entries.push(entry);
+      });
+      for (var i = 0; i < entries.length; i++) {
+        var blob = await entries[i].async("blob");
+        var baseName = entries[i].name.split("/").pop();
+        out.push(new File([blob], baseName, { type: "application/pdf" }));
+      }
+    } catch (e) { /* not a valid/readable zip — skip it silently, same as any other unsupported file */ }
+    return out;
+  }
+
+  async function handleFiles(fileList){
+    var incoming = Array.prototype.slice.call(fileList);
+    var files = [];
+    for (var i = 0; i < incoming.length; i++) {
+      var f = incoming[i];
+      if (isZipFile(f)) {
+        var extracted = await extractPdfsFromZip(f);
+        files = files.concat(extracted);
+      } else if (isPdfFile(f)) {
+        files.push(f);
+      }
+    }
+    if (!files.length) return;
+    var queue = files.slice();
+    function worker(){
+      var next = queue.shift();
+      if (!next) return Promise.resolve();
+      return processFile(next).then(worker);
+    }
+    worker(); worker();
+  }
+
+  fileInput.addEventListener("change", function(){ handleFiles(fileInput.files); fileInput.value = ""; });
+  dropzone.addEventListener("dragover", function(e){ e.preventDefault(); dropzone.classList.add("drag"); });
+  ["dragleave", "drop"].forEach(function(evt){
+    dropzone.addEventListener(evt, function(e){ e.preventDefault(); dropzone.classList.remove("drag"); });
+  });
+  dropzone.addEventListener("drop", function(e){
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+  });
+  dropzone.addEventListener("click", function(e){
+    if (e.target === fileInput) return;
+    e.preventDefault();
+    fileInput.click();
+  });
+
+  addRowBtn.addEventListener("click", function(){
+    var id = uid();
+    insertRow(id, { fileName: "(manual row)", status: "manual" });
+    ensureExamplesCleared();
+    rowEls.get(id).inputs.buyerName.focus();
+  });
+  clearExamplesBtn.addEventListener("click", clearExamples);
+
+  exportBtn.addEventListener("click", function(){
+    var header = ["Source file"].concat(COLUMNS.map(function(c){ return c.label; })).concat(["Invoice File"]);
+    var aoa = [header];
+    rows.forEach(function(r, id){
+      if (r.status === "example") return;
+      var el = rowEls.get(id);
+      var row = [r.fileName];
+      COLUMNS.forEach(function(c){ row.push(el.inputs[c.key].value); });
+      row.push(r.fileLink || "");
+      aoa.push(row);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 22 }].concat(COLUMNS.map(function(c){ return { wch: c.w }; })).concat([{ wch: 30 }]);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+    var out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    var blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var d = new Date();
+    var stamp = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "tyresnmore-invoices-" + stamp + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  });
+
+  function seedExamples(){
+    insertRow(uid(), {
+      fileName: "sample-fkmp-invoice.pdf", status: "example",
+      orderId: "TNM-ORD-88213", costCenter: "PUN-RETAIL-01", salesLedger: "Retail Sales - Tyres", voucherType: "Tax Invoice",
+      salesmanName: "Rahul Kadam", leadSource: "Flipkart Ads",
+      crmOrderId: "OD3298471562018400", costPrice: "3450.00", supplierName: "Apollo Tyres Ltd.", dispatchedThrough: "Delhivery",
+      billingCity: "Pune", fsnDetails: "TYRDGH8J3ZQNKMFR", product: "Apollo Amazer 4G Life 175/65 R14",
+      hasOffer: "Yes", tnmDiscount: "200.00", orderDate: "14/08/2026",
+      skuCode: "TNM-APL-AMZ4G-175-65-R14", quantity: "4",
+      totalInvoiceAmount: "15436.00", sellingPricePerItem: "3859.00", preGstPrice: "3270.34",
+      shippingChargePerItem: "0.00", totalInclFkmp: "15436.00",
+      invoiceNo: "TNMFK/26-27/08341", invoiceAmount: "15436.00", tnmBillingInvoiceDate: "08/14/26",
+      taxLedgerCgst: "Output CGST 9%", cgst: "694.86", taxLedgerSgst: "Output SGST 9%", sgst: "694.86",
+      taxLedgerIgst: "", igst: "0.00",
+      buyerName: "Rohan Mehta", shipToName: "Rohan Mehta", addressLine1: "12/4 Lakeview Residency",
+      addressLine2: "Baner Road", city: "Pune", state: "Maharashtra", pinCode: "411045",
+      phoneNo: "98xxxxxx21", emailId: "rohan.m@example.com", hsn: "4011"
+    });
+    insertRow(uid(), {
+      fileName: "sample-tnm-billing.pdf", status: "example",
+      orderId: "TNM-ORD-88347", costCenter: "HYD-RETAIL-02", salesLedger: "Retail Sales - Accessories", voucherType: "Tax Invoice",
+      salesmanName: "Divya Rao", leadSource: "Organic search",
+      crmOrderId: "OD3298471562019112", costPrice: "1120.00", supplierName: "JK Tyre & Industries", dispatchedThrough: "Ecom Express",
+      billingCity: "Hyderabad", fsnDetails: "ACCDGH8J3ZRTLQPX", product: "JK Wheel Cover Set 15-inch",
+      hasOffer: "No", tnmDiscount: "0.00", orderDate: "02/09/2026",
+      skuCode: "TNM-JK-WCS15-4PC", quantity: "1",
+      totalInvoiceAmount: "1899.00", sellingPricePerItem: "1899.00", preGstPrice: "1609.32",
+      shippingChargePerItem: "49.00", totalInclFkmp: "1948.00",
+      invoiceNo: "TNMFK/26-27/08512", invoiceAmount: "1899.00", tnmBillingInvoiceDate: "09/02/26",
+      taxLedgerCgst: "Output CGST 9%", cgst: "144.84", taxLedgerSgst: "Output SGST 9%", sgst: "144.84",
+      taxLedgerIgst: "", igst: "0.00",
+      buyerName: "Sana Iqbal", shipToName: "Sana Iqbal", addressLine1: "Flat 302, Silver Oak Apartments",
+      addressLine2: "Banjara Hills", city: "Hyderabad", state: "Telangana", pinCode: "500034",
+      phoneNo: "91xxxxxx47", emailId: "sana.iqbal@example.com", hsn: "6506"
+    });
+    clearExamplesBtn.hidden = false;
+    refreshStats();
+  }
+
+  function updateBanner(){
+    var msgs = [];
+    if (!config.aiConfigured) msgs.push("Auto-fill from AI isn't set up on this server yet — fields will need to be entered manually.");
+    if (!config.driveConfigured) msgs.push("PDF storage isn't set up yet — uploaded files won't be attached to their row.");
+    if (!config.sheetsConfigured) msgs.push("Google Sheet sync isn't set up yet — rows will only exist in this browser tab until you export.");
+    if (msgs.length) {
+      aiBannerText.textContent = msgs.join(" ");
+      aiBanner.classList.add("show");
+    } else {
+      aiBanner.classList.remove("show");
+    }
+    statusBadge.textContent = config.sheetsConfigured
+      ? "No account needed · syncing to Google Sheet"
+      : "No account needed · Google Sheet sync not yet configured";
+  }
+
+  function startApp(){
+    gate.hidden = true;
+    app.hidden = false;
+    buildHead();
+    updateBanner();
+    seedExamples();
+  }
+
+  async function boot(){
+    try {
+      var res = await fetch("/api/config");
+      var cfg = await res.json();
+      config.requiresAccessCode = !!cfg.requiresAccessCode;
+      config.sheetsConfigured = !!cfg.sheetsConfigured;
+      config.driveConfigured = !!cfg.driveConfigured;
+      config.aiConfigured = cfg.sheetsConfigured || cfg.driveConfigured || true; // refined below by actual extract calls
+      config.aiConfigured = true; // optimistic; /api/extract itself reports server_not_configured per-call if wrong
+    } catch (e) { /* server may be starting up; fall through without a gate */ }
+
+    if (!config.requiresAccessCode) { startApp(); return; }
+    if (accessCode) { startApp(); return; } // already unlocked this browser tab session
+
+    gate.hidden = false;
+    gateBtn.addEventListener("click", async function(){
+      var v = gateInput.value.trim();
+      if (!v) { gateErr.textContent = "Enter the passcode."; return; }
+      gateBtn.disabled = true;
+      gateErr.textContent = "";
+      try {
+        var res2 = await fetch("/api/verify-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: v }) });
+        if (!res2.ok) { gateErr.textContent = "That passcode isn't right — try again."; gateBtn.disabled = false; return; }
+        accessCode = v;
+        sessionStorage.setItem("tnm_access_code", v);
+        startApp();
+      } catch (e) {
+        gateErr.textContent = "Couldn't reach the server — try again.";
+        gateBtn.disabled = false;
+      }
+    });
+    gateInput.addEventListener("keydown", function(e){ if (e.key === "Enter") gateBtn.click(); });
+    gateInput.focus();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
