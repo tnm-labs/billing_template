@@ -40,9 +40,11 @@ function isRateLimited(ip) {
 }
 
 // ------------------------------------------------------------------
-// Invoices tab — 31 fields mirroring "Invoice template_shailesh2.xlsx"
-// column-for-column, in its original order. Labels are kept verbatim
-// from that spreadsheet. `team` is a BEST-GUESS assignment (Sales/
+// Invoices tab — originally 31 fields mirroring "Invoice
+// template_shailesh2.xlsx" column-for-column; CRM Order ID, Salesman, and
+// Fitmate Date / Delivery Date were dropped at Manoj's request (2026-09-29,
+// unused fields), leaving 28. Remaining labels are kept verbatim from that
+// spreadsheet. `team` is a BEST-GUESS assignment (Sales/
 // Accounts/OPS/MP Team) for the colour-coded grouping in the tool's UI
 // and the Sheet's row-1 header — relabelling any column is a one-line
 // change below.
@@ -56,10 +58,7 @@ function isRateLimited(ip) {
 // ------------------------------------------------------------------
 const COLUMNS = [
   { key: "orderStatus",          label: "Order Status",                 team: "OPS",      derivable: false, formula: true },
-  { key: "crmOrderId",           label: "CRM Order ID",                 team: "MP Team",  derivable: false },
-  { key: "salesman",             label: "Salesman",                     team: "Sales",    derivable: false },
   { key: "supplierName",         label: "Supplier Name",                team: "Sales",    derivable: true },
-  { key: "fitmentDeliveryDate",  label: "Fitmate Date / Delivery Date", team: "OPS",      derivable: false },
   { key: "taxableValue",         label: "Taxable value",                team: "Accounts", derivable: true },
   { key: "invoiceValue",         label: "Invoice value",                team: "Accounts", derivable: true },
   { key: "igst",                 label: "IGST",                         team: "Accounts", derivable: true },
@@ -100,6 +99,19 @@ const DERIVABLE_KEYS = COLUMNS.filter((c) => c.derivable).map((c) => c.key);
 // first data column AND the dedup key scanned by syncOrdersToSheet —
 // no separate hidden row-key column is needed here since it's already
 // guaranteed unique per row.
+//
+// The first 8 columns are the original set and keep their original
+// order/position so the already-synced "All orders" tab doesn't get
+// reshuffled; every column after actualShipoutDate is one of the
+// remaining columns from Seller Flex's own "all orders" CSV export
+// (see importOrdersFromCsv), added so every field in that export ends
+// up in the Sheet, not just a curated subset. Labels are the CSV's own
+// column headers verbatim. A CSV can have several lines per order
+// (one per shipment/split); every one of these, like sku/title
+// already did, just takes its value from that order's FIRST line —
+// see importOrdersFromCsv's per-order `orders.push` for the one
+// exception (the two dates, which take the earliest/latest across all
+// of an order's lines instead).
 // ------------------------------------------------------------------
 const ORDERS_COLUMNS = [
   { key: "orderId",               label: "Customer Order ID" },
@@ -109,8 +121,32 @@ const ORDERS_COLUMNS = [
   { key: "sku",                   label: "MSKU" },
   { key: "title",                 label: "Title" },
   { key: "shipmentCreationDate",  label: "Shipment Creation Date" },
-  { key: "actualShipoutDate",     label: "Actual Shipout Date" }
+  { key: "actualShipoutDate",     label: "Actual Shipout Date" },
+  { key: "shipmentId",            label: "Shipment ID" },
+  { key: "shipmentType",          label: "shipment Type" },
+  { key: "flexSku",               label: "SKU" },
+  { key: "asin",                  label: "ASIN" },
+  { key: "customId",              label: "Custom ID" },
+  { key: "shipmentTrackingId",    label: "Shipment Tracking ID" },
+  { key: "exsd",                  label: "ExSD" },
+  { key: "assignedToPicklist",    label: "Assigned to picklist" },
+  { key: "packed",                label: "Packed" },
+  { key: "hazmat",                label: "Hazmat" },
+  { key: "serialNumber",          label: "Serial Number" },
+  { key: "expiry",                label: "Expiry" },
+  { key: "giftMsg",               label: "Gift Msg" },
+  { key: "giftWrap",              label: "Gift Wrap" },
+  { key: "isFastTrack",           label: "Is Fast Track" },
+  { key: "channel",               label: "Channel" }
 ];
+// Every ORDERS_COLUMNS key except orderId/orderStatus/orderValue/units
+// (computed specially) and the two dates (min/max'd separately) is
+// carried straight through from the CSV using this same "first line
+// wins" rule — built from ORDERS_COLUMNS itself so a future column
+// addition doesn't need a matching change in three different places.
+const ORDERS_PASSTHROUGH_KEYS = ORDERS_COLUMNS
+  .map((c) => c.key)
+  .filter((k) => !["orderId", "orderStatus", "orderValue", "units", "shipmentCreationDate", "actualShipoutDate"].includes(k));
 
 const FIELD_NOTES = [
   "supplierName: the seller/supplier name as printed on the invoice (TyresNmore's own selling entity, or the upstream brand if shown separately).",
@@ -483,6 +519,9 @@ function importOrdersFromCsv(csvText) {
     return parseFloat(String(v || "").replace(/,/g, "")) || 0;
   }
 
+  const columnByKey = {};
+  ORDERS_COLUMNS.forEach((c) => { columnByKey[c.key] = c; });
+
   const groups = new Map();
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -493,11 +532,18 @@ function importOrdersFromCsv(csvText) {
       status: (r[idx["Status"]] || "").trim(),
       orderValue: toNumber(r[idx["Order Value"]]),
       units: toNumber(r[idx["Units"]]),
-      sku: (r[idx["MSKU"]] || "").trim(),
-      title: (r[idx["Title"]] || "").trim(),
       shipmentCreationDate: idx["Shipment Creation Date"] !== undefined ? (r[idx["Shipment Creation Date"]] || "").trim() : "",
       actualShipoutDate: idx["Actual Shipout Date"] !== undefined ? (r[idx["Actual Shipout Date"]] || "").trim() : ""
     };
+    // Every other ORDERS_COLUMNS field (sku/title included — MSKU/Title are
+    // just the two of these that happen to be required) is carried through
+    // generically by column label, so a CSV missing an optional column
+    // (an older export, say) just leaves that field blank instead of
+    // breaking the import.
+    ORDERS_PASSTHROUGH_KEYS.forEach((key) => {
+      const label = columnByKey[key].label;
+      line[key] = idx[label] !== undefined ? (r[idx[label]] || "").trim() : "";
+    });
     if (!groups.has(orderId)) groups.set(orderId, []);
     groups.get(orderId).push(line);
   }
@@ -519,16 +565,20 @@ function importOrdersFromCsv(csvText) {
     const first = useLines[0];
     if (!active.length) cancelledOrders += 1;
     ordersValueTotal += orderValue;
-    orders.push({
+    const order = {
       orderId,
       orderStatus: bestStatus,
       orderValue: orderValue.toFixed(2),
       units: units ? String(units) : "",
-      sku: first.sku || "",
-      title: first.title || "",
       shipmentCreationDate: pickExtremeDate(lines.map((l) => l.shipmentCreationDate), false),
       actualShipoutDate: pickExtremeDate(lines.map((l) => l.actualShipoutDate), true)
-    });
+    };
+    // Every remaining column (a shipment can have several lines per order —
+    // a split shipment, say — so these can genuinely differ line to line)
+    // takes whichever value is on the order's first active line, same as
+    // sku/title already did before this became a generic loop.
+    ORDERS_PASSTHROUGH_KEYS.forEach((key) => { order[key] = first[key] || ""; });
+    orders.push(order);
   });
 
   return {
