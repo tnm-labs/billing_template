@@ -40,100 +40,83 @@ function isRateLimited(ip) {
 }
 
 // ------------------------------------------------------------------
-// The 61 fields, mirroring the team's Amazon order-report export
-// ("Invoice template_shailesh.xlsx") column-for-column, in its
-// original order. Labels are kept verbatim from that spreadsheet
-// (including its typos — e.g. "Fitmate Date", "Promish Delivery
-// Date" — so the exported sheet still matches what the team expects).
-// `team` is a BEST-GUESS assignment (Sales/Accounts/OPS/MP Team) —
-// relabeling any column is a one-line change below.
-// This is an ops/order-tracking report, not a printed invoice
-// template, so most of these fields never appear on an invoice PDF.
-// `derivable:false` fields are internal/manual-only and are never
-// sent to the AI extractor — they stay blank until a person fills
-// them in (from the marketplace seller portal, not the invoice).
+// Invoices tab — 31 fields mirroring "Invoice template_shailesh2.xlsx"
+// column-for-column, in its original order. Labels are kept verbatim
+// from that spreadsheet. `team` is a BEST-GUESS assignment (Sales/
+// Accounts/OPS/MP Team) for the colour-coded grouping in the tool's UI
+// and the Sheet's row-1 header — relabelling any column is a one-line
+// change below.
+// `derivable:false` fields are internal/manual-only and are never sent
+// to the AI extractor — they stay blank until a person fills them in.
 // Only `derivable:true` fields are asked of the AI extractor.
+// `formula:true` (Order Status only) means this column is never written
+// from extracted/typed values at all — the sync step always overwrites
+// it with a live VLOOKUP formula that reads the order's status from the
+// "All orders" tab, by order ID. See orderStatusFormula() below.
 // ------------------------------------------------------------------
 const COLUMNS = [
-  { key: "crmOrderId",                   label: "CRM Order ID",                            team: "MP Team",  derivable: false },
-  { key: "salesman",                     label: "Salesman",                                team: "Sales",    derivable: false },
-  { key: "supplierName",                 label: "Supplier Name",                           team: "Sales",    derivable: true },
-  { key: "fitmentDeliveryDate",          label: "Fitmate Date / Delivery Date",            team: "OPS",      derivable: false },
-  { key: "orderId",                      label: "order-id",                                team: "MP Team",  derivable: true },
-  { key: "orderItemId",                  label: "order-item-id",                           team: "MP Team",  derivable: false },
-  { key: "purchaseDate",                 label: "purchase-date",                           team: "MP Team",  derivable: true },
-  { key: "paymentsDate",                 label: "payments-date",                           team: "Accounts", derivable: false },
-  { key: "reportingDate",                label: "reporting-date",                          team: "Accounts", derivable: false },
-  { key: "promiseDate",                  label: "promise-date",                            team: "OPS",      derivable: false },
-  { key: "daysPastPromise",              label: "days-past-promise",                       team: "OPS",      derivable: false },
-  { key: "buyerEmail",                   label: "buyer-email",                             team: "Sales",    derivable: false },
-  { key: "buyerName",                    label: "buyer-name",                              team: "Sales",    derivable: true },
-  { key: "buyerPhoneNumber",             label: "buyer-phone-number",                      team: "Sales",    derivable: true },
-  { key: "sku",                          label: "sku",                                     team: "Sales",    derivable: true },
-  { key: "numberOfItems",                label: "number-of-items",                         team: "Sales",    derivable: true },
-  { key: "productName",                  label: "product-name",                            team: "Sales",    derivable: true },
-  { key: "quantityPurchased",            label: "quantity-purchased",                      team: "Sales",    derivable: true },
-  { key: "quantityShipped",              label: "quantity-shipped",                        team: "OPS",      derivable: false },
-  { key: "quantityToShip",               label: "quantity-to-ship",                        team: "OPS",      derivable: false },
-  { key: "shipServiceLevel",             label: "ship-service-level",                      team: "OPS",      derivable: false },
-  { key: "recipientName",                label: "recipient-name",                          team: "Sales",    derivable: true },
-  { key: "shipAddress1",                 label: "ship-address-1",                          team: "Sales",    derivable: true },
-  { key: "shipAddress2",                 label: "ship-address-2",                          team: "Sales",    derivable: true },
-  { key: "shipAddress3",                 label: "ship-address-3",                          team: "Sales",    derivable: true },
-  { key: "shipCity",                     label: "ship-city",                               team: "Sales",    derivable: true },
-  { key: "shipState",                    label: "ship-state",                              team: "Sales",    derivable: true },
-  { key: "shipPostalCode",               label: "ship-postal-code",                        team: "Sales",    derivable: true },
-  { key: "shipCountry",                  label: "ship-country",                            team: "Sales",    derivable: true },
-  { key: "isBusinessOrder",              label: "is-business-order",                       team: "MP Team",  derivable: false },
-  { key: "purchaseOrderNumber",          label: "purchase-order-number",                   team: "MP Team",  derivable: false },
-  { key: "priceDesignation",             label: "price-designation",                       team: "MP Team",  derivable: false },
-  { key: "isPrime",                      label: "is-prime",                                team: "MP Team",  derivable: false },
-  { key: "shipmentStatus",               label: "shipment-status",                         team: "OPS",      derivable: false },
-  { key: "isIba",                        label: "is-iba",                                  team: "MP Team",  derivable: false },
-  { key: "isBuyerRequestedCancellation", label: "is-buyer-requested-cancellation",         team: "MP Team",  derivable: false },
-  { key: "buyerRequestedCancelReason",   label: "buyer-requested-cancel-reason",           team: "MP Team",  derivable: false },
-  { key: "vergeOfCancellation",          label: "verge-of-cancellation",                   team: "OPS",      derivable: false },
-  { key: "vergeOfLateShipment",          label: "verge-of-lateShipment",                   team: "OPS",      derivable: false },
-  { key: "handlingTime",                 label: "handling-time",                           team: "OPS",      derivable: false },
-  { key: "effectiveHandlingTime",        label: "effective-handling-time",                 team: "OPS",      derivable: false },
-  { key: "handlingTimeSource",           label: "handling-time-source",                    team: "OPS",      derivable: false },
-  { key: "transitTime",                  label: "transit-time",                            team: "OPS",      derivable: false },
-  { key: "transitTimeSource",            label: "transit-time-source",                     team: "OPS",      derivable: false },
-  { key: "transitTimeShipFromCity",      label: "transit-time-ship-from-city",             team: "OPS",      derivable: false },
-  { key: "transitTimeShipFromState",     label: "transit-time-ship-from-state",            team: "OPS",      derivable: false },
-  { key: "transitTimeShipFromCountry",   label: "transit-time-ship-from-country",          team: "OPS",      derivable: false },
-  { key: "agentName",                    label: "Agent Name",                              team: "OPS",      derivable: false },
-  { key: "ticketStatus",                 label: "Ticket Status",                           team: "OPS",      derivable: false },
-  { key: "orderStatus",                  label: "Order Status",                            team: "OPS",      derivable: false },
-  { key: "amzPortalMessage",             label: "AMZ Portal message/Hardik Email",         team: "OPS",      derivable: false },
-  { key: "wheelBalancingFitmentCharges", label: "Wheel balancing/Fitment charges",         team: "Accounts", derivable: false },
-  { key: "promishDeliveryDate",          label: "Promish Delivery Date",                   team: "OPS",      derivable: false },
-  { key: "remarks",                      label: "Remarks",                                 team: "OPS",      derivable: false },
-  { key: "fitmentDate",                  label: "Fitment Date (Double click)",             team: "OPS",      derivable: false },
-  { key: "fulfilmentType",               label: "FULFILMENT TYPE",                         team: "OPS",      derivable: false },
-  { key: "actualFitmentDeliveryDate",    label: "Actual Fitment/Delivery Date",            team: "OPS",      derivable: false },
-  { key: "cmRemark",                     label: "CM Remark",                               team: "OPS",      derivable: false },
-  { key: "deliverBy",                    label: "Deliver by:",                             team: "OPS",      derivable: false },
-  { key: "dateOfOrderAndTime",           label: "Date of Order and time",                  team: "MP Team",  derivable: false },
-  { key: "dateOrder",                    label: "Date Order",                              team: "MP Team",  derivable: false },
-  // Added for the Seller Flex "all orders" CSV import (see importOrdersFromCsv
-  // below) and the finance hand-off it enables — neither is AI-derivable from
-  // an invoice PDF, so both are appended here rather than inserted mid-list,
-  // to avoid reshuffling columns in a Sheet that's already in use.
-  { key: "orderValue",                   label: "Order Value (Seller Flex)",               team: "Accounts", derivable: false },
-  { key: "accountsRemarks",              label: "Accounts Remarks",                        team: "Accounts", derivable: false }
+  { key: "orderStatus",          label: "Order Status",                 team: "OPS",      derivable: false, formula: true },
+  { key: "crmOrderId",           label: "CRM Order ID",                 team: "MP Team",  derivable: false },
+  { key: "salesman",             label: "Salesman",                     team: "Sales",    derivable: false },
+  { key: "supplierName",         label: "Supplier Name",                team: "Sales",    derivable: true },
+  { key: "fitmentDeliveryDate",  label: "Fitmate Date / Delivery Date", team: "OPS",      derivable: false },
+  { key: "taxableValue",         label: "Taxable value",                team: "Accounts", derivable: true },
+  { key: "invoiceValue",         label: "Invoice value",                team: "Accounts", derivable: true },
+  { key: "igst",                 label: "IGST",                         team: "Accounts", derivable: true },
+  { key: "cgst",                 label: "CGST",                         team: "Accounts", derivable: true },
+  { key: "sgst",                 label: "SGST",                         team: "Accounts", derivable: true },
+  { key: "orderId",              label: "order-id",                     team: "MP Team",  derivable: true },
+  { key: "orderItemId",          label: "order-item-id",                team: "MP Team",  derivable: false },
+  { key: "purchaseDate",         label: "purchase-date",                team: "MP Team",  derivable: true },
+  { key: "paymentsDate",         label: "payments-date",                team: "Accounts", derivable: false },
+  { key: "buyerName",            label: "buyer-name",                   team: "Sales",    derivable: true },
+  { key: "buyerPhoneNumber",     label: "buyer-phone-number",           team: "Sales",    derivable: true },
+  { key: "sku",                  label: "sku",                          team: "Sales",    derivable: true },
+  { key: "numberOfItems",        label: "number-of-items",              team: "Sales",    derivable: true },
+  { key: "productName",          label: "product-name",                 team: "Sales",    derivable: true },
+  { key: "quantityPurchased",    label: "quantity-purchased",           team: "Sales",    derivable: true },
+  { key: "quantityShipped",      label: "quantity-shipped",             team: "OPS",      derivable: false },
+  { key: "quantityToShip",       label: "quantity-to-ship",             team: "OPS",      derivable: false },
+  { key: "shipServiceLevel",     label: "ship-service-level",           team: "OPS",      derivable: false },
+  { key: "recipientName",        label: "recipient-name",               team: "Sales",    derivable: true },
+  { key: "shipAddress1",         label: "ship-address-1",               team: "Sales",    derivable: true },
+  { key: "shipAddress2",         label: "ship-address-2",               team: "Sales",    derivable: true },
+  { key: "shipAddress3",         label: "ship-address-3",               team: "Sales",    derivable: true },
+  { key: "shipCity",             label: "ship-city",                    team: "Sales",    derivable: true },
+  { key: "shipState",            label: "ship-state",                   team: "Sales",    derivable: true },
+  { key: "shipPostalCode",       label: "ship-postal-code",             team: "Sales",    derivable: true },
+  // Never auto-filled from extraction or CSV import, by design — finance
+  // fills this in by hand once a TnM invoice has actually been raised
+  // for the order, so it stays blank on every sync no matter what.
+  { key: "accountsRemarks",      label: "Accounts Remarks",             team: "Accounts", derivable: false }
 ];
 const FIELD_KEYS = COLUMNS.map((c) => c.key);
 const DERIVABLE_KEYS = COLUMNS.filter((c) => c.derivable).map((c) => c.key);
-// Fields the Seller Flex orders-CSV import can populate automatically
-// (see importOrdersFromCsv). Kept separate from DERIVABLE_KEYS (which is
-// specifically "sent to the AI extractor") since these come from a CSV,
-// not the model — but both are "auto-sourced" from the client's point of
-// view for the field-locking behaviour in public/index.html.
-const CSV_IMPORT_KEYS = ["orderId", "sku", "productName", "quantityPurchased", "orderStatus", "orderValue"];
+
+// ------------------------------------------------------------------
+// "All orders" tab — the master record for every Seller Flex order,
+// invoiced or not, imported from the portal's "all orders" CSV. One
+// row per order (see importOrdersFromCsv). orderId doubles as both the
+// first data column AND the dedup key scanned by syncOrdersToSheet —
+// no separate hidden row-key column is needed here since it's already
+// guaranteed unique per row.
+// ------------------------------------------------------------------
+const ORDERS_COLUMNS = [
+  { key: "orderId",               label: "Customer Order ID" },
+  { key: "orderStatus",           label: "Status" },
+  { key: "orderValue",            label: "Order Value" },
+  { key: "units",                 label: "Units" },
+  { key: "sku",                   label: "MSKU" },
+  { key: "title",                 label: "Title" },
+  { key: "shipmentCreationDate",  label: "Shipment Creation Date" },
+  { key: "actualShipoutDate",     label: "Actual Shipout Date" }
+];
 
 const FIELD_NOTES = [
   "supplierName: the seller/supplier name as printed on the invoice (TyresNmore's own selling entity, or the upstream brand if shown separately).",
+  "taxableValue: the taxable value (pre-tax amount) as printed on the invoice.",
+  "invoiceValue: the total invoice value (including tax) as printed.",
+  "igst / cgst / sgst: the IGST / CGST / SGST amounts from the invoice's tax breakup, exactly as printed — use \"0\" if a tax line is explicitly shown as zero, and leave empty only if that tax isn't shown on the invoice at all.",
   'orderId: the marketplace order ID (Amazon\'s "Order ID" / Flipkart\'s order ID), exactly as printed.',
   "purchaseDate: the order/purchase date exactly as printed — this is the order date, not the invoice date.",
   "buyerName: the customer/buyer's name.",
@@ -144,7 +127,7 @@ const FIELD_NOTES = [
   "quantityPurchased: the numeric quantity ordered for the item.",
   "recipientName: the name on the shipping/delivery address (may differ from buyerName).",
   "shipAddress1 / shipAddress2 / shipAddress3: the shipping address split across up to three lines, in order — leave later lines empty if the printed address has fewer lines.",
-  "shipCity / shipState / shipPostalCode / shipCountry: the shipping address's city, state, postal/PIN code, and country."
+  "shipCity / shipState / shipPostalCode: the shipping address's city, state, and postal/PIN code."
 ].join("\n- ");
 
 function buildPrompt(text) {
@@ -174,6 +157,7 @@ let sheetsClient = null;
 let driveClient = null;
 let googleReady = false;
 let headerChecked = false;
+let ordersHeaderChecked = false;
 
 async function initGoogle() {
   const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
@@ -223,6 +207,21 @@ function colLetterFor(n) {
   return s;
 }
 
+function ordersTabName() { return process.env.GOOGLE_ORDERS_TAB || "All orders"; }
+
+// Builds the live formula that fills the Invoices tab's "Order Status"
+// cell, looking the order up by ID in the "All orders" tab rather than
+// having our server write a point-in-time status value. The order ID is
+// embedded as a literal in the formula (not a same-row cell reference) —
+// simpler than working out which row an append landed on, at the small
+// cost that hand-editing an order-id cell afterwards won't move the
+// lookup with it (that's already discouraged: order-id is a locked,
+// auto-filled field unless someone explicitly unlocks it).
+function orderStatusFormula(orderId) {
+  const safeId = String(orderId || "").replace(/"/g, '""');
+  return '=IFERROR(VLOOKUP("' + safeId + '", \'' + ordersTabName() + "'!A:B, 2, FALSE), \"\")";
+}
+
 // NOTE on a bug this fixes: the old version checked cell A1 for "does a
 // header already exist?" — but A1 is the blank corner cell above "Row Key"
 // by design, so that check always saw "empty" and re-appended a brand new
@@ -248,6 +247,24 @@ async function ensureHeaderRows() {
   headerChecked = true;
 }
 
+// Same idempotent fixed-range approach for the "All orders" tab, which
+// only needs a single plain header row (no team colour-coding — it's a
+// flat mirror of the Seller Flex export, not a form teams fill in).
+async function ensureOrdersHeaderRow() {
+  if (ordersHeaderChecked) return;
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  const tab = ordersTabName();
+  const row1 = ORDERS_COLUMNS.map((c) => c.label);
+  const lastCol = colLetterFor(row1.length);
+  await sheetsClient.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: tab + "!A1:" + lastCol + "1",
+    valueInputOption: "RAW",
+    requestBody: { values: [row1] }
+  });
+  ordersHeaderChecked = true;
+}
+
 async function findRowByKey(rowKey) {
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const tab = process.env.GOOGLE_SHEET_TAB || "Invoices";
@@ -263,7 +280,12 @@ async function syncRowToSheet(rowKey, values, fileLink) {
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const tab = process.env.GOOGLE_SHEET_TAB || "Invoices";
   await ensureHeaderRows();
-  const rowValues = [rowKey].concat(COLUMNS.map((c) => String((values && values[c.key]) || ""))).concat([fileLink || ""]);
+  const rowValues = [rowKey].concat(COLUMNS.map((c) => {
+    // Order Status is never taken from the client — it's always the live
+    // lookup formula, regardless of whatever (if anything) was sent for it.
+    if (c.formula) return orderStatusFormula(values && values.orderId);
+    return String((values && values[c.key]) || "");
+  })).concat([fileLink || ""]);
   const existingRow = await findRowByKey(rowKey);
   if (existingRow) {
     await sheetsClient.spreadsheets.values.update({
@@ -281,6 +303,57 @@ async function syncRowToSheet(rowKey, values, fileLink) {
       requestBody: { values: [rowValues] }
     });
   }
+}
+
+// Upserts a batch of aggregated orders (see importOrdersFromCsv) straight
+// into the "All orders" tab, keyed by order ID in column A. Reads that
+// column once up front rather than doing a per-order lookup — a CSV
+// import can easily cover dozens of orders at a time — then issues at
+// most one batchUpdate (existing orders) and one append (new orders).
+async function syncOrdersToSheet(orders) {
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  const tab = ordersTabName();
+  await ensureOrdersHeaderRow();
+
+  const resp = await sheetsClient.spreadsheets.values.get({ spreadsheetId: sheetId, range: tab + "!A:A" });
+  const col = resp.data.values || [];
+  const existingRowByOrderId = new Map();
+  for (let i = 0; i < col.length; i++) {
+    const id = col[i][0];
+    if (id) existingRowByOrderId.set(id, i + 1);
+  }
+
+  const updates = [];
+  const appends = [];
+  let created = 0, updated = 0;
+  orders.forEach((order) => {
+    const rowValues = ORDERS_COLUMNS.map((c) => String((order && order[c.key]) || ""));
+    const existingRow = existingRowByOrderId.get(order.orderId);
+    if (existingRow) {
+      updates.push({ range: tab + "!A" + existingRow, values: [rowValues] });
+      updated += 1;
+    } else {
+      appends.push(rowValues);
+      created += 1;
+    }
+  });
+
+  if (updates.length) {
+    await sheetsClient.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data: updates }
+    });
+  }
+  if (appends.length) {
+    await sheetsClient.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: tab + "!A:A",
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: appends }
+    });
+  }
+  return { created, updated };
 }
 
 async function uploadPdfToDrive(buffer, filename) {
@@ -307,15 +380,21 @@ async function uploadPdfToDrive(buffer, filename) {
 // Seller Flex "all orders" CSV import.
 //
 // Ops downloads this from the Seller Flex portal (Orders > All orders >
-// download report). Same Amazon order can appear on several lines — e.g.
-// a cancelled pick attempt followed by the one that actually shipped, or
-// one line per unit/shipment within a multi-item order — so this groups
-// by Customer Order ID into a single row per order:
+// download report). The same Amazon order can appear on several lines —
+// e.g. a cancelled pick attempt followed by the one that actually
+// shipped, or one line per unit/shipment within a multi-item order — so
+// this groups by Customer Order ID into a single row per order, which
+// then gets upserted straight into the "All orders" tab (see
+// syncOrdersToSheet), the master record for every order whether or not
+// it has a TnM invoice yet:
 //   - orderStatus: the furthest-along status seen for that order (Packed
 //     beats Manifested beats Confirmed; Cancelled only wins if every line
 //     for that order was cancelled).
-//   - orderValue / quantityPurchased: summed across the non-cancelled
-//     lines only, so a cancelled-then-reshipped order isn't double-counted.
+//   - orderValue / units: summed across the non-cancelled lines only, so
+//     a cancelled-then-reshipped order isn't double-counted.
+//   - shipmentCreationDate / actualShipoutDate: the earliest / latest of
+//     that column across the order's lines (falling back to the first
+//     non-empty raw value if none of them parse as a date).
 // A small dependency-free CSV parser is used here (RFC4180-ish: handles
 // quoted fields with embedded commas/quotes) rather than adding a new npm
 // package for what is one input format.
@@ -355,6 +434,30 @@ function parseCsv(text) {
 
 const ORDER_STATUS_RANK = { Delivered: 5, Shipped: 4, Packed: 3, Manifested: 2, Confirmed: 1, Cancelled: 0 };
 
+function parseFlexDate(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Picks the raw (unparsed) date string whose parsed value is earliest
+// (wantLatest=false) or latest (wantLatest=true) among the given values,
+// so the displayed text stays exactly as Seller Flex printed it. Falls
+// back to the first non-empty raw value if none of them parse.
+function pickExtremeDate(values, wantLatest) {
+  let best = null, bestParsed = null, fallback = "";
+  values.forEach((v) => {
+    if (!v) return;
+    if (!fallback) fallback = v;
+    const d = parseFlexDate(v);
+    if (!d) return;
+    if (bestParsed === null || (wantLatest ? d > bestParsed : d < bestParsed)) {
+      bestParsed = d; best = v;
+    }
+  });
+  return best !== null ? best : fallback;
+}
+
 function importOrdersFromCsv(csvText) {
   const rows = parseCsv(csvText);
   if (!rows.length) return { orders: [], summary: { totalOrders: 0, ordersValueTotal: "0.00", cancelledOrders: 0 } };
@@ -367,6 +470,9 @@ function importOrdersFromCsv(csvText) {
   if (missing.length) {
     throw new Error("This doesn't look like a Seller Flex orders export — missing column(s): " + missing.join(", "));
   }
+  // Shipment Creation Date / Actual Shipout Date are used if present but
+  // aren't required — an older or slightly different export without them
+  // just leaves those two columns blank rather than failing the import.
 
   // Strips thousands-separator commas (e.g. "1,234.50") before parseFloat —
   // plain parseFloat stops at the first comma and would silently read that
@@ -388,7 +494,9 @@ function importOrdersFromCsv(csvText) {
       orderValue: toNumber(r[idx["Order Value"]]),
       units: toNumber(r[idx["Units"]]),
       sku: (r[idx["MSKU"]] || "").trim(),
-      title: (r[idx["Title"]] || "").trim()
+      title: (r[idx["Title"]] || "").trim(),
+      shipmentCreationDate: idx["Shipment Creation Date"] !== undefined ? (r[idx["Shipment Creation Date"]] || "").trim() : "",
+      actualShipoutDate: idx["Actual Shipout Date"] !== undefined ? (r[idx["Actual Shipout Date"]] || "").trim() : ""
     };
     if (!groups.has(orderId)) groups.set(orderId, []);
     groups.get(orderId).push(line);
@@ -407,7 +515,7 @@ function importOrdersFromCsv(csvText) {
       if (rank > bestRank) { bestRank = rank; bestStatus = l.status; }
     });
     const orderValue = useLines.reduce((sum, l) => sum + l.orderValue, 0);
-    const quantityPurchased = useLines.reduce((sum, l) => sum + l.units, 0);
+    const units = useLines.reduce((sum, l) => sum + l.units, 0);
     const first = useLines[0];
     if (!active.length) cancelledOrders += 1;
     ordersValueTotal += orderValue;
@@ -415,9 +523,11 @@ function importOrdersFromCsv(csvText) {
       orderId,
       orderStatus: bestStatus,
       orderValue: orderValue.toFixed(2),
-      quantityPurchased: quantityPurchased ? String(quantityPurchased) : "",
+      units: units ? String(units) : "",
       sku: first.sku || "",
-      productName: first.title || ""
+      title: first.title || "",
+      shipmentCreationDate: pickExtremeDate(lines.map((l) => l.shipmentCreationDate), false),
+      actualShipoutDate: pickExtremeDate(lines.map((l) => l.actualShipoutDate), true)
     });
   });
 
@@ -501,17 +611,32 @@ app.post("/api/sync-row", async (req, res) => {
   }
 });
 
-app.post("/api/import-orders", (req, res) => {
+// Imports a Seller Flex "all orders" CSV straight into the "All orders"
+// tab — aggregation AND the Sheet write both happen here, server-side, in
+// one round trip. The client no longer walks the parsed orders one by one
+// (that per-order dance is what the Invoices tab's PDF-upload flow still
+// does; orders don't touch the Invoices tab at all any more).
+app.post("/api/import-orders", async (req, res) => {
   if (!checkAccessCode(req, res)) return;
   if (isRateLimited("import:" + req.ip)) return res.status(429).json({ error: "rate_limited" });
   const csvText = String((req.body && req.body.csv) || "");
   if (!csvText.trim()) return res.status(400).json({ error: "empty_csv" });
+
+  let result;
   try {
-    const result = importOrdersFromCsv(csvText);
-    res.json(result);
+    result = importOrdersFromCsv(csvText);
   } catch (e) {
     console.error("orders CSV import failed:", e && e.message);
-    res.status(400).json({ error: "bad_csv", message: (e && e.message) || "unknown" });
+    return res.status(400).json({ error: "bad_csv", message: (e && e.message) || "unknown" });
+  }
+  if (!sheetsReady()) return res.status(500).json({ error: "sheets_not_configured" });
+
+  try {
+    const { created, updated } = await syncOrdersToSheet(result.orders);
+    res.json({ summary: Object.assign({}, result.summary, { created, updated }) });
+  } catch (e) {
+    console.error("orders sheet sync failed:", e && e.message);
+    res.status(502).json({ error: "orders_sync_failed", message: (e && e.message) || "unknown" });
   }
 });
 
@@ -519,8 +644,7 @@ app.get("/api/config", (req, res) => {
   res.json({
     requiresAccessCode: Boolean(accessCode),
     sheetsConfigured: sheetsReady(),
-    driveConfigured: driveReady(),
-    csvImportKeys: CSV_IMPORT_KEYS
+    driveConfigured: driveReady()
   });
 });
 
