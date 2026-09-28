@@ -796,7 +796,25 @@
       if (!r) return;
       r.fileLink = body.link;
       renderFileCell(realId);
-      scheduleSync(realId);
+      // The Drive upload usually finishes before AI extraction does (it
+      // doesn't wait on the AI call), so syncing here unconditionally used
+      // to sync the row while its order ID — and therefore its Sheet row
+      // key, see applyFieldsToInputs — was still unknown. That wrote a
+      // real Sheet row under the row's throwaway random-UUID key, with a
+      // blank order-id and so a VLOOKUP("", …) Order Status formula; once
+      // extraction finished moments later it re-keyed the row to
+      // "order:<id>" and synced AGAIN, which — since findRowByKey looks
+      // rows up by that new key — couldn't find the row it had just
+      // created and appended a second, complete one instead. One upload,
+      // two Sheet rows, one of them permanently blank. Skipping the sync
+      // here while extraction is still in flight avoids creating that
+      // stray row in the first place; the fileLink is already on `r`, so
+      // extraction's own sync (scheduleSync in runExtraction /
+      // mergeExtractedRowIntoExisting) picks it up once the row's real key
+      // is settled.
+      if (r.status !== "reading" && r.status !== "extracting") {
+        scheduleSync(realId);
+      }
     } catch (e) { /* leave file unlinked; row still has its data */ }
   }
 
