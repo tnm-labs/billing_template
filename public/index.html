@@ -56,10 +56,6 @@
   .masthead p{ margin:0; font-size:14px; color:rgba(255,255,255,0.78); max-width:74ch; }
   .masthead .badge{ display:inline-flex; align-self:flex-start; margin-top:2px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; background:rgba(255,255,255,0.14); padding:3px 10px; border-radius:99px; }
 
-  .legend{ display:flex; flex-wrap:wrap; gap:8px 16px; font-size:12px; color:var(--text-muted); align-items:center; }
-  .legend .sw{ display:inline-flex; align-items:center; gap:5px; }
-  .legend .dot{ width:9px; height:9px; border-radius:3px; }
-
   .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
   .stat{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
   .stat .n{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:22px; font-weight:600; }
@@ -87,13 +83,7 @@
   .table-scroll{ overflow-x:auto; max-height:72vh; overflow-y:auto; }
   table{ border-collapse:collapse; font-size:12.5px; }
   thead th{ position:sticky; background:var(--steel-soft); color:var(--steel-text); text-align:left; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; padding:8px 9px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); white-space:nowrap; }
-  thead tr.grp th{ top:0; font-size:10px; z-index:2; }
-  thead tr.grp th.team-Sales{ background:var(--sales-soft); color:var(--sales); }
-  thead tr.grp th.team-Accounts{ background:var(--accounts-soft); color:var(--accounts); }
-  thead tr.grp th.team-OPS{ background:var(--ops-soft); color:var(--ops); }
-  thead tr.grp th.team-MPTeam{ background:var(--mp-soft); color:var(--mp); }
-  thead tr.grp th.team-{ background:var(--surface-3); color:var(--steel-text); }
-  thead tr.fld th{ top:var(--head1-h, 31px); z-index:1; }
+  thead tr.fld th{ top:0; z-index:1; }
   tbody td{ padding:5px 8px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); vertical-align:middle; }
   tbody tr:last-child td{ border-bottom:none; }
   tbody tr.example{ opacity:0.62; }
@@ -170,14 +160,6 @@
     <h1>TnM Billing Template</h1>
     <p>Drop in a marketplace order invoice PDF, or upload the Seller Flex orders CSV to get every order into the sheet the same day &mdash; before its invoice even exists. Fields each source can answer are filled in automatically; everything else stays blank for the owning team to fill in. Every row saves straight into the shared Google Sheet, with the original PDF attached for anyone who needs to open it.</p>
     <span class="badge" id="statusBadge">No account needed &middot; syncing to Google Sheet</span>
-  </div>
-
-  <div class="legend">
-    <span class="sw"><span class="dot" style="background:var(--sales)"></span>Sales</span>
-    <span class="sw"><span class="dot" style="background:var(--ops)"></span>OPS</span>
-    <span class="sw"><span class="dot" style="background:var(--accounts)"></span>Accounts</span>
-    <span class="sw"><span class="dot" style="background:var(--mp)"></span>MP Team</span>
-    <span>&mdash; column colors show which team usually owns that field (first pass, correct as needed).</span>
   </div>
 
   <div class="stats">
@@ -330,35 +312,19 @@
   }
   function esc(s){ return String(s == null ? "" : s); }
   function chWidth(w){ return Math.max(70, Math.min(260, w * 7.2)); }
-  function teamClass(team){ return "team-" + String(team || "").replace(/\s+/g, ""); }
   function svgFile(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5" stroke-linejoin="round"/></svg>';
   }
 
   function buildHead(){
-    var groups = [];
-    COLUMNS.forEach(function(c){
-      var last = groups[groups.length - 1];
-      if (last && last.name === c.team) { last.span += 1; }
-      else { groups.push({ name:c.team, span:1 }); }
-    });
-    var rowGrp = document.createElement("tr");
-    rowGrp.className = "grp";
-    rowGrp.appendChild(th("", { rowspan:2, style:"width:34px" }));
-    rowGrp.appendChild(th("Invoice file", { rowspan:2 }));
-    groups.forEach(function(g){ rowGrp.appendChild(th(g.name, { colspan:g.span, cls:teamClass(g.name) })); });
-    rowGrp.appendChild(th("Status", { rowspan:2 }));
-    rowGrp.appendChild(th("", { rowspan:2, style:"width:34px" }));
-
     var rowFld = document.createElement("tr");
     rowFld.className = "fld";
+    rowFld.appendChild(th("", { style:"width:34px" }));
+    rowFld.appendChild(th("Invoice file", {}));
     COLUMNS.forEach(function(c){ rowFld.appendChild(th(c.label, { style:"min-width:" + chWidth(c.w) + "px" })); });
-
-    thead.appendChild(rowGrp);
+    rowFld.appendChild(th("Status", {}));
+    rowFld.appendChild(th("", { style:"width:34px" }));
     thead.appendChild(rowFld);
-    requestAnimationFrame(function(){
-      thead.style.setProperty("--head1-h", rowGrp.getBoundingClientRect().height + "px");
-    });
   }
   function th(text, opts){
     opts = opts || {};
