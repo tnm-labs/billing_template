@@ -185,6 +185,7 @@
     <span>PDFs, or a .zip of PDFs (e.g. an Amazon bulk invoice download) &middot; each PDF is stored and linked, its text is used to auto-fill fields &middot; Seller Flex invoices only for now (others are rejected before upload &mdash; no cost, nothing saved)</span>
     <input type="file" id="fileInput" accept="application/pdf,.zip,application/zip" multiple>
   </label>
+  <div class="ordersresult" id="rejectedResult" hidden></div>
 
   <label class="dropzone" id="ordersDropzone" for="ordersFileInput">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
@@ -278,6 +279,7 @@
   var exportBtn = document.getElementById("exportBtn");
   var fileInput = document.getElementById("fileInput");
   var dropzone = document.getElementById("dropzone");
+  var rejectedResult = document.getElementById("rejectedResult");
   var ordersFileInput = document.getElementById("ordersFileInput");
   var ordersDropzone = document.getElementById("ordersDropzone");
   var ordersResult = document.getElementById("ordersResult");
@@ -851,7 +853,7 @@
     return ALLOWED_INVOICE_MARKER.test(text || "");
   }
 
-  async function processFile(file){
+  async function processFile(file, batch){
     var id = uid();
     uploadedCount += 1;
     insertRow(id, { fileName: file.name, status: "reading" });
@@ -881,12 +883,18 @@
     // left to fall through to the existing "no extractable text" handling
     // below instead of being misreported as the wrong invoice type.
     if (text.trim() && !isAllowedInvoice(text)) {
-      r.status = "error";
-      setChip(id);
-      el.errDiv.textContent = "This isn't a Seller Flex invoice, so it isn't allowed here yet — only Seller Flex invoices (invoices with a \"JJGZ\" invoice number) can be uploaded. We can expand this to other invoice types later.";
-      el.retryBtn.style.display = "none";
-      el.detailTr.hidden = false;
-      refreshStats();
+      // No per-file error row/message here any more — a bulk .zip can mix
+      // in dozens of non-Seller-Flex invoices, and a row (plus its own
+      // rejection message) for every single one used to bury the invoices
+      // that DID matter under a wall of identical "not Seller Flex"
+      // rows. This file's temporary row is removed outright, and the
+      // rejection is folded into one running summary line instead — see
+      // updateRejectedBanner / rejectedResult.
+      removeRow(id);
+      if (batch) {
+        batch.rejected.push(file.name);
+        updateRejectedBanner(batch);
+      }
       return;
     }
 
@@ -920,7 +928,20 @@
     refreshStats();
   }
 
-  async function runExtraction(id, text){
+  // MAX_RATE_LIMIT_RETRIES / retry delays: a bulk .zip of invoices only
+  // runs 2 extraction calls at a time (see the `worker()` pool in
+  // handleFiles), but a big enough batch can still outrun the server's
+  // per-minute rate limit — that used to just strand the row with a
+  // "Rate limited" error needing a manual click per row, silently
+  // leaving several invoices out of a batch (e.g. 11 of 49 in one real
+  // upload). A rate-limited extraction now retries itself automatically
+  // with a short backoff, up to MAX_RATE_LIMIT_RETRIES times, via the
+  // `attempt` parameter — so a normal-sized batch recovers on its own and
+  // only a truly persistent problem (or a very large batch that keeps
+  // outrunning the limit) still needs a manual "Retry extraction" click.
+  var MAX_RATE_LIMIT_RETRIES = 6;
+  async function runExtraction(id, text, attempt){
+    attempt = attempt || 0;
     var r = rows.get(id), el = rowEls.get(id);
     if (!config.aiConfigured) {
       r.status = "manual";
@@ -947,6 +968,15 @@
       scheduleSync(id);
     } catch (e) {
       var code = e && e.code;
+      if (code === "rate_limited" && attempt < MAX_RATE_LIMIT_RETRIES) {
+        var delaySeconds = Math.min(30, 4 * (attempt + 1));
+        el.errDiv.textContent = "Rate limited by a large batch — retrying automatically in " + delaySeconds + "s…";
+        el.detailTr.hidden = false;
+        showSourceToggle(id);
+        refreshStats();
+        setTimeout(function(){ runExtraction(id, text, attempt + 1); }, delaySeconds * 1000);
+        return;
+      }
       var msg = ({
         rate_limited: "Rate limited — wait a moment and retry.",
         server_not_configured: "The server isn't set up with an API key yet — enter fields manually for now.",
@@ -1002,13 +1032,29 @@
       }
     }
     if (!files.length) return;
+    // Tracks every file from THIS drop/selection that the Seller Flex
+    // check rejects, so they're reported as one summary line instead of a
+    // separate error row per file — a bulk .zip can easily mix in dozens
+    // of non-Seller-Flex invoices alongside the ones this tool handles.
+    var batch = { rejected: [] };
+    rejectedResult.hidden = true;
     var queue = files.slice();
     function worker(){
       var next = queue.shift();
       if (!next) return Promise.resolve();
-      return processFile(next).then(worker);
+      return processFile(next, batch).then(worker);
     }
     worker(); worker();
+  }
+
+  function updateRejectedBanner(batch){
+    if (!batch.rejected.length) { rejectedResult.hidden = true; return; }
+    var maxNames = 10;
+    var shown = batch.rejected.slice(0, maxNames).join(", ");
+    var extra = batch.rejected.length > maxNames ? " (+" + (batch.rejected.length - maxNames) + " more)" : "";
+    var n = batch.rejected.length;
+    rejectedResult.textContent = n + (n === 1 ? " file" : " files") + " skipped — not Seller Flex invoices (no \"JJGZ\" in the invoice number): " + shown + extra;
+    rejectedResult.hidden = false;
   }
 
   fileInput.addEventListener("change", function(){ handleFiles(fileInput.files); fileInput.value = ""; });
