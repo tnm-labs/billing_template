@@ -101,8 +101,17 @@
   td input{ width:100%; min-width:100%; border:1px solid transparent; background:transparent; color:var(--text); font-size:12.5px; padding:5px 6px; border-radius:6px; }
   td input:hover{ border-color:var(--border); }
   td input:focus{ border-color:var(--accent); background:var(--surface); outline:none; }
+  td input:disabled{ color:var(--text-muted); cursor:not-allowed; }
   td.num input, td.mono input{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
   td.file{ max-width:180px; }
+  td.fieldcell{ display:flex; align-items:center; gap:2px; }
+  td.fieldcell input{ width:auto; min-width:0; flex:1 1 auto; }
+  .unlockbtn{ display:none; flex:0 0 auto; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-muted); font-size:11px; width:20px; height:20px; padding:0; border-radius:6px; cursor:pointer; }
+  .unlockbtn.show{ display:inline-flex; }
+  .unlockbtn:hover{ background:var(--surface-2); color:var(--text); }
+
+  .ordersresult{ font-size:12.5px; color:var(--text-muted); background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; }
+  .ordersresult.err{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
   .filename{ display:flex; align-items:center; gap:6px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .filename svg{ flex:none; width:14px; height:14px; color:var(--text-muted); }
   a.filelink{ color:var(--accent); text-decoration:none; font-weight:600; }
@@ -159,7 +168,7 @@
   <div class="masthead">
     <div class="eyebrow">TyresNmore &middot; Sales &middot; OPS &middot; Accounts</div>
     <h1>TnM Billing Template</h1>
-    <p>Drop in a marketplace order invoice PDF. Fields the invoice can answer are filled in automatically; everything else stays blank for the owning team to fill in. Every row saves straight into the shared Google Sheet, with the original PDF attached for anyone who needs to open it.</p>
+    <p>Drop in a marketplace order invoice PDF, or upload the Seller Flex orders CSV to get every order into the sheet the same day &mdash; before its invoice even exists. Fields each source can answer are filled in automatically; everything else stays blank for the owning team to fill in. Every row saves straight into the shared Google Sheet, with the original PDF attached for anyone who needs to open it.</p>
     <span class="badge" id="statusBadge">No account needed &middot; syncing to Google Sheet</span>
   </div>
 
@@ -187,11 +196,19 @@
     <input type="file" id="fileInput" accept="application/pdf,.zip,application/zip" multiple>
   </label>
 
+  <label class="dropzone" id="ordersDropzone" for="ordersFileInput">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
+    <strong>Upload the Seller Flex &ldquo;all orders&rdquo; CSV</strong>
+    <span>Order Status and Order Value fill in for every order in the file &mdash; new rows are created for orders that don't have an invoice yet, and matched into existing rows by order ID for ones that do</span>
+    <input type="file" id="ordersFileInput" accept=".csv,text/csv">
+  </label>
+  <div class="ordersresult" id="ordersResult" hidden></div>
+
   <div class="toolbar">
     <div class="left">
       <button class="btn" id="addRowBtn" type="button">+ Add row manually</button>
       <button class="btn" id="clearExamplesBtn" type="button" hidden>Clear example rows</button>
-      <span class="hint">42 fields &middot; scroll the table sideways to see them all</span>
+      <span class="hint" id="fieldCountHint"></span>
     </div>
     <button class="btn primary" id="exportBtn" type="button" disabled>Export to Excel (backup copy)</button>
   </div>
@@ -221,48 +238,69 @@
 
   // Mirrors the COLUMNS array in server.js — keep the two in sync.
   var COLUMNS = [
-    { key:"orderId",               label:"Order Id",                                team:"Sales",    cls:"mono", w:14 },
-    { key:"costCenter",            label:"Cost Center",                             team:"Accounts", cls:"",     w:14 },
-    { key:"salesLedger",           label:"Sales Ledger",                            team:"Accounts", cls:"",     w:16 },
-    { key:"voucherType",           label:"Voucher Type",                            team:"Accounts", cls:"",     w:14 },
-    { key:"salesmanName",          label:"salesman name",                           team:"Sales",    cls:"",     w:18 },
-    { key:"leadSource",            label:"Lead Source",                             team:"Sales",    cls:"",     w:16 },
-    { key:"crmOrderId",            label:"CRM Order id",                            team:"MP Team",  cls:"mono", w:20 },
-    { key:"costPrice",             label:"Cost Price",                              team:"Accounts", cls:"num",  w:12 },
-    { key:"supplierName",          label:"Supplier name",                           team:"Sales",    cls:"",     w:20 },
-    { key:"dispatchedThrough",     label:"Dispatched through",                      team:"OPS",      cls:"",     w:16 },
-    { key:"billingCity",           label:"Billing City",                            team:"Sales",    cls:"",     w:14 },
-    { key:"fsnDetails",            label:"FSN Details for Creatives - Tyresnmore.", team:"Sales",    cls:"mono", w:20 },
-    { key:"product",               label:"Product",                                 team:"Sales",    cls:"",     w:26 },
-    { key:"hasOffer",              label:"HAS OFFER",                               team:"Sales",    cls:"",     w:10 },
-    { key:"tnmDiscount",           label:"TNM Discount",                            team:"Sales",    cls:"num",  w:12 },
-    { key:"orderDate",             label:"Order Date",                              team:"Sales",    cls:"mono", w:12 },
-    { key:"skuCode",               label:"SKU Code",                                team:"Sales",    cls:"mono", w:20 },
-    { key:"quantity",              label:"Quantity",                                team:"Sales",    cls:"num",  w:8  },
-    { key:"totalInvoiceAmount",    label:"Total invoice Amount",                    team:"Sales",    cls:"num",  w:14 },
-    { key:"sellingPricePerItem",   label:"Selling Price Per Item",                  team:"Sales",    cls:"num",  w:14 },
-    { key:"preGstPrice",           label:"Pre GST Price",                           team:"Sales",    cls:"num",  w:12 },
-    { key:"shippingChargePerItem", label:"Shipping Charge per item",                team:"Sales",    cls:"num",  w:14 },
-    { key:"totalInclFkmp",         label:"Total (includes FKMP contribution)",      team:"Sales",    cls:"num",  w:16 },
-    { key:"invoiceNo",             label:"Invoice No.",                             team:"Sales",    cls:"mono", w:16 },
-    { key:"invoiceAmount",         label:"Invoice Amount",                          team:"Accounts", cls:"num",  w:12 },
-    { key:"tnmBillingInvoiceDate", label:"TNM Billing Invoice Date (mm/dd/yy)",     team:"Accounts", cls:"mono", w:14 },
-    { key:"taxLedgerCgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
-    { key:"cgst",                  label:"CGST",                                    team:"Accounts", cls:"num",  w:10 },
-    { key:"taxLedgerSgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
-    { key:"sgst",                  label:"SGST",                                    team:"Accounts", cls:"num",  w:10 },
-    { key:"taxLedgerIgst",         label:"Tax Ledger",                              team:"Accounts", cls:"",     w:16 },
-    { key:"igst",                  label:"IGST",                                    team:"Accounts", cls:"num",  w:10 },
-    { key:"buyerName",             label:"Buyer name",                              team:"Sales",    cls:"",     w:20 },
-    { key:"shipToName",            label:"Ship to name",                           team:"Sales",    cls:"",     w:20 },
-    { key:"addressLine1",          label:"Address Line 1",                          team:"Sales",    cls:"",     w:28 },
-    { key:"addressLine2",          label:"Address Line 2",                          team:"Sales",    cls:"",     w:22 },
-    { key:"city",                  label:"City",                                    team:"Sales",    cls:"",     w:14 },
-    { key:"state",                 label:"State",                                   team:"Sales",    cls:"",     w:14 },
-    { key:"pinCode",               label:"PIN Code",                                team:"Sales",    cls:"mono", w:9  },
-    { key:"phoneNo",               label:"Phone No",                                team:"Sales",    cls:"mono", w:13 },
-    { key:"emailId",               label:"Email Id",                                team:"Sales",    cls:"mono", w:22 },
-    { key:"hsn",                   label:"HSN",                                     team:"Accounts", cls:"mono", w:9  }
+    { key:"crmOrderId",                   label:"CRM Order ID",                            team:"MP Team",  cls:"mono", w:16 },
+    { key:"salesman",                     label:"Salesman",                                team:"Sales",    cls:"",     w:16 },
+    { key:"supplierName",                 label:"Supplier Name",                           team:"Sales",    cls:"",     w:20 },
+    { key:"fitmentDeliveryDate",          label:"Fitmate Date / Delivery Date",            team:"OPS",      cls:"mono", w:16 },
+    { key:"orderId",                      label:"order-id",                                team:"MP Team",  cls:"mono", w:20 },
+    { key:"orderItemId",                  label:"order-item-id",                           team:"MP Team",  cls:"mono", w:16 },
+    { key:"purchaseDate",                 label:"purchase-date",                           team:"MP Team",  cls:"mono", w:12 },
+    { key:"paymentsDate",                 label:"payments-date",                           team:"Accounts", cls:"mono", w:12 },
+    { key:"reportingDate",                label:"reporting-date",                          team:"Accounts", cls:"mono", w:12 },
+    { key:"promiseDate",                  label:"promise-date",                            team:"OPS",      cls:"mono", w:12 },
+    { key:"daysPastPromise",              label:"days-past-promise",                       team:"OPS",      cls:"num",  w:10 },
+    { key:"buyerEmail",                   label:"buyer-email",                             team:"Sales",    cls:"mono", w:22 },
+    { key:"buyerName",                    label:"buyer-name",                              team:"Sales",    cls:"",     w:20 },
+    { key:"buyerPhoneNumber",             label:"buyer-phone-number",                      team:"Sales",    cls:"mono", w:14 },
+    { key:"sku",                          label:"sku",                                     team:"Sales",    cls:"mono", w:16 },
+    { key:"numberOfItems",                label:"number-of-items",                         team:"Sales",    cls:"num",  w:10 },
+    { key:"productName",                  label:"product-name",                            team:"Sales",    cls:"",     w:26 },
+    { key:"quantityPurchased",            label:"quantity-purchased",                      team:"Sales",    cls:"num",  w:10 },
+    { key:"quantityShipped",              label:"quantity-shipped",                        team:"OPS",      cls:"num",  w:10 },
+    { key:"quantityToShip",               label:"quantity-to-ship",                        team:"OPS",      cls:"num",  w:10 },
+    { key:"shipServiceLevel",             label:"ship-service-level",                      team:"OPS",      cls:"",     w:14 },
+    { key:"recipientName",                label:"recipient-name",                          team:"Sales",    cls:"",     w:20 },
+    { key:"shipAddress1",                 label:"ship-address-1",                          team:"Sales",    cls:"",     w:26 },
+    { key:"shipAddress2",                 label:"ship-address-2",                          team:"Sales",    cls:"",     w:22 },
+    { key:"shipAddress3",                 label:"ship-address-3",                          team:"Sales",    cls:"",     w:22 },
+    { key:"shipCity",                     label:"ship-city",                               team:"Sales",    cls:"",     w:14 },
+    { key:"shipState",                    label:"ship-state",                              team:"Sales",    cls:"",     w:14 },
+    { key:"shipPostalCode",               label:"ship-postal-code",                        team:"Sales",    cls:"mono", w:11 },
+    { key:"shipCountry",                  label:"ship-country",                            team:"Sales",    cls:"",     w:11 },
+    { key:"isBusinessOrder",              label:"is-business-order",                       team:"MP Team",  cls:"",     w:11 },
+    { key:"purchaseOrderNumber",          label:"purchase-order-number",                   team:"MP Team",  cls:"mono", w:16 },
+    { key:"priceDesignation",             label:"price-designation",                       team:"MP Team",  cls:"",     w:14 },
+    { key:"isPrime",                      label:"is-prime",                                team:"MP Team",  cls:"",     w:8  },
+    { key:"shipmentStatus",               label:"shipment-status",                         team:"OPS",      cls:"",     w:14 },
+    { key:"isIba",                        label:"is-iba",                                  team:"MP Team",  cls:"",     w:8  },
+    { key:"isBuyerRequestedCancellation", label:"is-buyer-requested-cancellation",         team:"MP Team",  cls:"",     w:14 },
+    { key:"buyerRequestedCancelReason",   label:"buyer-requested-cancel-reason",           team:"MP Team",  cls:"",     w:18 },
+    { key:"vergeOfCancellation",          label:"verge-of-cancellation",                   team:"OPS",      cls:"",     w:14 },
+    { key:"vergeOfLateShipment",          label:"verge-of-lateShipment",                   team:"OPS",      cls:"",     w:14 },
+    { key:"handlingTime",                 label:"handling-time",                           team:"OPS",      cls:"num",  w:10 },
+    { key:"effectiveHandlingTime",        label:"effective-handling-time",                 team:"OPS",      cls:"num",  w:12 },
+    { key:"handlingTimeSource",           label:"handling-time-source",                    team:"OPS",      cls:"",     w:14 },
+    { key:"transitTime",                  label:"transit-time",                            team:"OPS",      cls:"num",  w:10 },
+    { key:"transitTimeSource",            label:"transit-time-source",                     team:"OPS",      cls:"",     w:14 },
+    { key:"transitTimeShipFromCity",      label:"transit-time-ship-from-city",             team:"OPS",      cls:"",     w:16 },
+    { key:"transitTimeShipFromState",     label:"transit-time-ship-from-state",            team:"OPS",      cls:"",     w:16 },
+    { key:"transitTimeShipFromCountry",   label:"transit-time-ship-from-country",          team:"OPS",      cls:"",     w:16 },
+    { key:"agentName",                    label:"Agent Name",                              team:"OPS",      cls:"",     w:16 },
+    { key:"ticketStatus",                 label:"Ticket Status",                           team:"OPS",      cls:"",     w:14 },
+    { key:"orderStatus",                  label:"Order Status",                            team:"OPS",      cls:"",     w:14 },
+    { key:"amzPortalMessage",             label:"AMZ Portal message/Hardik Email",         team:"OPS",      cls:"",     w:24 },
+    { key:"wheelBalancingFitmentCharges", label:"Wheel balancing/Fitment charges",         team:"Accounts", cls:"num",  w:16 },
+    { key:"promishDeliveryDate",          label:"Promish Delivery Date",                   team:"OPS",      cls:"mono", w:14 },
+    { key:"remarks",                      label:"Remarks",                                 team:"OPS",      cls:"",     w:22 },
+    { key:"fitmentDate",                  label:"Fitment Date (Double click)",             team:"OPS",      cls:"mono", w:16 },
+    { key:"fulfilmentType",               label:"FULFILMENT TYPE",                         team:"OPS",      cls:"",     w:14 },
+    { key:"actualFitmentDeliveryDate",    label:"Actual Fitment/Delivery Date",            team:"OPS",      cls:"mono", w:16 },
+    { key:"cmRemark",                     label:"CM Remark",                               team:"OPS",      cls:"",     w:18 },
+    { key:"deliverBy",                    label:"Deliver by:",                             team:"OPS",      cls:"mono", w:12 },
+    { key:"dateOfOrderAndTime",           label:"Date of Order and time",                  team:"MP Team",  cls:"mono", w:16 },
+    { key:"dateOrder",                    label:"Date Order",                              team:"MP Team",  cls:"mono", w:12 },
+    { key:"orderValue",                   label:"Order Value (Seller Flex)",               team:"Accounts", cls:"num",  w:14 },
+    { key:"accountsRemarks",              label:"Accounts Remarks",                        team:"Accounts", cls:"",     w:24 }
   ];
   var FIELDS = COLUMNS.map(function(c){ return c.key; });
   var META_COLS = 4;
@@ -280,6 +318,10 @@
   var exportBtn = document.getElementById("exportBtn");
   var fileInput = document.getElementById("fileInput");
   var dropzone = document.getElementById("dropzone");
+  var ordersFileInput = document.getElementById("ordersFileInput");
+  var ordersDropzone = document.getElementById("ordersDropzone");
+  var ordersResult = document.getElementById("ordersResult");
+  var fieldCountHint = document.getElementById("fieldCountHint");
   var aiBanner = document.getElementById("aiBanner");
   var aiBannerText = document.getElementById("aiBannerText");
   var statusBadge = document.getElementById("statusBadge");
@@ -296,6 +338,17 @@
   var accessCode = sessionStorage.getItem("tnm_access_code") || "";
   var config = { requiresAccessCode: false, sheetsConfigured: false, driveConfigured: false };
   var syncTimers = new Map();
+  // Maps an order ID (however it was first learned — AI extraction, a CSV
+  // import, or a manual edit) to the row id that owns it, so a PDF invoice
+  // and a Seller Flex CSV row for the same order land on ONE line in the
+  // Sheet no matter which one arrives first.
+  var orderIdIndex = new Map();
+  // When a temporary "reading this PDF" row turns out to belong to an order
+  // that already has a row (created earlier from the orders CSV), that row
+  // gets merged into the existing one and removed — this remembers where
+  // it went, so a still-in-flight Drive upload for the removed row's file
+  // lands on the right row instead of silently doing nothing.
+  var redirects = new Map();
 
   function uid(){ seq += 1; return "r" + seq; }
   function makeRowKey(){
@@ -350,7 +403,7 @@
     rows.forEach(function(r){
       if (r.status === "example") return;
       if (r.status === "extracted") auto += 1;
-      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading") review += 1;
+      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading" || r.status === "orderOnly") review += 1;
       if (r.syncState === "ok") synced += 1;
     });
     statUploaded.textContent = uploadedCount;
@@ -369,6 +422,7 @@
       extracting: ["chip busy", '<span class="spin"></span> Extracting'],
       extracted: ["chip ok", "Extracted"],
       manual: ["chip manual", "Manual entry"],
+      orderOnly: ["chip manual", "Order received — no invoice yet"],
       error: ["chip err", "Needs attention"]
     };
     var m = map[r.status] || map.manual;
@@ -391,12 +445,74 @@
     el.syncEl.textContent = m[1];
   }
 
-  function applyFieldsToInputs(id, data){
+  // markAuto: true when `data` came from an automated source (AI extraction
+  // or a Seller Flex CSV import) rather than someone typing — those fields
+  // get locked once this row next syncs successfully (see
+  // lockAutoFieldsAfterSync). A fresh automated pass is always allowed to
+  // refresh a field even if it's currently locked — locking only blocks a
+  // stray keystroke in the tool, not the pipeline that's supposed to keep
+  // the value current (e.g. Order Status needs to keep updating as a
+  // Seller Flex CSV is re-uploaded over the life of an order).
+  function applyFieldsToInputs(id, data, markAuto){
     var el = rowEls.get(id);
+    var r = rows.get(id);
     if (!el) return;
     FIELDS.forEach(function(f){
-      if (data && typeof data[f] === "string" && data[f].trim() !== "") el.inputs[f].value = data[f];
+      if (data && typeof data[f] === "string" && data[f].trim() !== "") {
+        el.inputs[f].value = data[f];
+        if (markAuto && r) r.autoFields.add(f);
+        if (f === "orderId") {
+          var orderIdVal = data[f].trim();
+          orderIdIndex.set(orderIdVal, id);
+          // Give this row a Sheet key derived from the order ID itself,
+          // instead of the random one it was created with. That makes the
+          // Sheet sync below idempotent: re-uploading the same invoice (or
+          // re-importing the same order) on a later day resolves to the
+          // SAME key, so it updates that existing Sheet row instead of
+          // appending a duplicate. Safe to do here because this always runs
+          // before the row's first sync is scheduled (see call sites).
+          if (r) r.rowKey = "order:" + orderIdVal;
+        }
+      }
     });
+  }
+
+  function applyLockState(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    Object.keys(el.inputs).forEach(function(key){
+      var locked = r.lockedFields.has(key);
+      el.inputs[key].disabled = locked;
+      var btn = el.unlockBtns[key];
+      if (btn) btn.classList.toggle("show", locked);
+    });
+  }
+
+  function unlockField(id, key){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    r.lockedFields.delete(key);
+    applyLockState(id);
+    if (el.inputs[key]) el.inputs[key].focus();
+  }
+
+  // Called right after a row syncs to the Sheet successfully: any field
+  // that was set automatically (AI extraction or CSV import) and currently
+  // has a value becomes read-only, so a mistaken keystroke can't silently
+  // overwrite good data with no way to catch it. Someone can still click
+  // the small lock icon to deliberately correct a field.
+  function lockAutoFieldsAfterSync(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var changed = false;
+    r.autoFields.forEach(function(key){
+      var input = el.inputs[key];
+      if (input && input.value.trim() !== "" && !r.lockedFields.has(key)) {
+        r.lockedFields.add(key);
+        changed = true;
+      }
+    });
+    if (changed) applyLockState(id);
   }
 
   function currentValues(id){
@@ -429,6 +545,7 @@
       });
       if (!res.ok) throw new Error("http_" + res.status);
       r.syncState = "ok";
+      lockAutoFieldsAfterSync(id);
     } catch (e) {
       r.syncState = "err";
     }
@@ -438,7 +555,11 @@
 
   function buildRow(id, opts){
     opts = opts || {};
-    var r = { id:id, rowKey: opts.rowKey || makeRowKey(), fileName: opts.fileName || "(manual row)", status: opts.status || "manual", rawText:"", fileLink: opts.fileLink || "", syncState: "idle" };
+    var r = {
+      id:id, rowKey: opts.rowKey || makeRowKey(), fileName: opts.fileName || "(manual row)", status: opts.status || "manual",
+      rawText:"", fileLink: opts.fileLink || "", syncState: "idle",
+      autoFields: new Set(), lockedFields: new Set()
+    };
     rows.set(id, r);
 
     var tr = document.createElement("tr");
@@ -457,19 +578,31 @@
     tr.appendChild(tdFile);
 
     var inputs = {};
+    var unlockBtns = {};
     COLUMNS.forEach(function(c){
       var td = document.createElement("td");
-      if (c.cls) td.className = c.cls;
+      td.className = (c.cls ? c.cls + " " : "") + "fieldcell";
       var input = document.createElement("input");
       input.type = "text";
       input.id = "f-" + c.key + "-" + id;
       input.value = opts[c.key] || "";
       input.autocomplete = "off";
       input.style.minWidth = chWidth(c.w) + "px";
-      input.addEventListener("input", function(){ scheduleSync(id); });
+      input.addEventListener("input", function(){
+        if (c.key === "orderId" && input.value.trim()) orderIdIndex.set(input.value.trim(), id);
+        scheduleSync(id);
+      });
+      var unlockBtn = document.createElement("button");
+      unlockBtn.type = "button";
+      unlockBtn.className = "unlockbtn";
+      unlockBtn.title = "This field was filled in automatically — click to unlock and edit it";
+      unlockBtn.innerHTML = "&#128274;";
+      unlockBtn.addEventListener("click", function(){ unlockField(id, c.key); });
       td.appendChild(input);
+      td.appendChild(unlockBtn);
       tr.appendChild(td);
       inputs[c.key] = input;
+      unlockBtns[c.key] = unlockBtn;
     });
 
     var tdStatus = document.createElement("td");
@@ -513,7 +646,7 @@
     detailTd.appendChild(retryBtn);
     detailTr.appendChild(detailTd);
 
-    rowEls.set(id, { tr:tr, detailTr:detailTr, inputs:inputs, tdFile:tdFile, statusChip:chip, syncEl:syncEl, pre:pre, srcBtn:srcBtn, errDiv:errDiv, retryBtn:retryBtn });
+    rowEls.set(id, { tr:tr, detailTr:detailTr, inputs:inputs, unlockBtns:unlockBtns, tdFile:tdFile, statusChip:chip, syncEl:syncEl, pre:pre, srcBtn:srcBtn, errDiv:errDiv, retryBtn:retryBtn });
     renderFileCell(id);
     setChip(id);
     setSyncLine(id);
@@ -541,6 +674,7 @@
     if (!el) return;
     el.tr.remove(); el.detailTr.remove();
     rowEls.delete(id); rows.delete(id);
+    orderIdIndex.forEach(function(rowId, orderId){ if (rowId === id) orderIdIndex.delete(orderId); });
     var t = syncTimers.get(id); if (t) clearTimeout(t);
     refreshStats();
   }
@@ -589,10 +723,46 @@
     return parts.join("\n\n");
   }
 
+  // Cuts down on re-paying for AI extraction when the same invoice batch
+  // gets uploaded again on a later day (the team's cumulative-upload
+  // habit): the exact text pulled from a given PDF is deterministic, so if
+  // this browser has already extracted this same text before, reuse that
+  // result instead of calling the API again. Keyed by a hash of the text,
+  // scoped to this browser only (not shared across teammates or machines —
+  // a genuine cross-team cache would need a server-side lookup, which this
+  // intentionally keeps out of scope for now). Every localStorage access is
+  // wrapped in try/catch: if it's unavailable, full, or throws for any
+  // reason, extraction just proceeds normally with no cache.
+  var EXTRACT_CACHE_PREFIX = "tnm-extract-cache:";
+  async function sha256Hex(str){
+    var enc = new TextEncoder().encode(str);
+    var buf = await crypto.subtle.digest("SHA-256", enc);
+    var bytes = Array.from(new Uint8Array(buf));
+    return bytes.map(function(b){ return b.toString(16).padStart(2, "0"); }).join("");
+  }
+  async function getCachedExtraction(textForApi){
+    if (!(window.crypto && crypto.subtle)) return null;
+    try {
+      var hash = await sha256Hex(textForApi);
+      var raw = localStorage.getItem(EXTRACT_CACHE_PREFIX + hash);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  async function setCachedExtraction(textForApi, data){
+    if (!(window.crypto && crypto.subtle)) return;
+    try {
+      var hash = await sha256Hex(textForApi);
+      localStorage.setItem(EXTRACT_CACHE_PREFIX + hash, JSON.stringify(data));
+    } catch (e) { /* quota exceeded or storage unavailable — skip caching */ }
+  }
+
   async function callExtractApi(text){
+    var textForApi = text.slice(0, 11000);
+    var cached = await getCachedExtraction(textForApi);
+    if (cached) return cached;
     var headers = { "Content-Type": "application/json" };
     if (accessCode) headers["x-access-code"] = accessCode;
-    var res = await fetch("/api/extract", { method: "POST", headers: headers, body: JSON.stringify({ text: text.slice(0, 11000) }) });
+    var res = await fetch("/api/extract", { method: "POST", headers: headers, body: JSON.stringify({ text: textForApi }) });
     var body = null;
     try { body = await res.json(); } catch (e) { /* ignore */ }
     if (!res.ok) {
@@ -600,6 +770,7 @@
       err.code = (body && body.error) || ("http_" + res.status);
       throw err;
     }
+    setCachedExtraction(textForApi, body.data);
     return body.data;
   }
 
@@ -614,11 +785,15 @@
       var body = null;
       try { body = await res.json(); } catch (e) { /* ignore */ }
       if (!res.ok || !body || !body.link) return;
-      var r = rows.get(id);
+      // If this row got merged into an existing (e.g. Seller-Flex-CSV-only)
+      // row while the upload was in flight, the file link belongs on
+      // whatever row it merged into, not the row that's since been removed.
+      var realId = redirects.get(id) || id;
+      var r = rows.get(realId);
       if (!r) return;
       r.fileLink = body.link;
-      renderFileCell(id);
-      scheduleSync(id);
+      renderFileCell(realId);
+      scheduleSync(realId);
     } catch (e) { /* leave file unlinked; row still has its data */ }
   }
 
@@ -651,6 +826,31 @@
     await runExtraction(id, text);
   }
 
+  // Called when a PDF's extraction reveals an order ID that's already on
+  // another row (almost always a row the Seller Flex CSV created earlier,
+  // before this invoice existed). Rather than leaving two rows for the same
+  // order, this folds the freshly-extracted fields and the file identity
+  // into that existing row, then removes the temporary "reading this PDF"
+  // row that was standing in for it.
+  function mergeExtractedRowIntoExisting(tempId, targetId, data){
+    var tempEl = rowEls.get(tempId), tempR = rows.get(tempId);
+    var targetEl = rowEls.get(targetId), targetR = rows.get(targetId);
+    if (!tempEl || !tempR || !targetEl || !targetR) return;
+    targetR.fileName = tempR.fileName;
+    if (tempR.fileLink) targetR.fileLink = tempR.fileLink;
+    targetR.rawText = tempR.rawText;
+    targetR.status = "extracted";
+    applyFieldsToInputs(targetId, data, true);
+    renderFileCell(targetId);
+    targetEl.pre.textContent = tempEl.pre.textContent;
+    if (tempR.rawText) showSourceToggle(targetId);
+    setChip(targetId);
+    scheduleSync(targetId);
+    redirects.set(tempId, targetId);
+    removeRow(tempId);
+    refreshStats();
+  }
+
   async function runExtraction(id, text){
     var r = rows.get(id), el = rowEls.get(id);
     if (!config.aiConfigured) {
@@ -664,7 +864,13 @@
     refreshStats();
     try {
       var data = await callExtractApi(text);
-      applyFieldsToInputs(id, data);
+      var extractedOrderId = (data && typeof data.orderId === "string" ? data.orderId.trim() : "");
+      var existingId = extractedOrderId ? orderIdIndex.get(extractedOrderId) : null;
+      if (existingId && existingId !== id && rows.has(existingId)) {
+        mergeExtractedRowIntoExisting(id, existingId, data);
+        return;
+      }
+      applyFieldsToInputs(id, data, true);
       r.status = "extracted";
       setChip(id);
       el.errDiv.textContent = "";
@@ -751,6 +957,94 @@
     fileInput.click();
   });
 
+  function readFileAsText(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(String(reader.result || "")); };
+      reader.onerror = function(){ reject(reader.error || new Error("read_failed")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function formatInr(n){
+    var num = Number(n) || 0;
+    return "₹" + num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  async function handleOrdersCsv(file){
+    ordersResult.hidden = false;
+    ordersResult.className = "ordersresult";
+    ordersResult.textContent = "Reading " + file.name + "…";
+    var text;
+    try {
+      text = await readFileAsText(file);
+    } catch (e) {
+      ordersResult.className = "ordersresult err";
+      ordersResult.textContent = "Couldn't read that file.";
+      return;
+    }
+    try {
+      var headers = { "Content-Type": "application/json" };
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res = await fetch("/api/import-orders", { method: "POST", headers: headers, body: JSON.stringify({ csv: text }) });
+      var body = null;
+      try { body = await res.json(); } catch (e) { /* ignore */ }
+      if (!res.ok) throw new Error((body && body.message) || (body && body.error) || ("http_" + res.status));
+
+      ensureExamplesCleared();
+      var created = 0, updated = 0;
+      (body.orders || []).forEach(function(order){
+        var existingId = orderIdIndex.get(order.orderId);
+        var id;
+        if (existingId && rows.has(existingId)) {
+          id = existingId;
+          updated += 1;
+        } else {
+          id = uid();
+          insertRow(id, { fileName: "(Seller Flex order — no invoice yet)", status: "orderOnly" });
+          created += 1;
+        }
+        applyFieldsToInputs(id, order, true);
+        setChip(id);
+        scheduleSync(id);
+      });
+
+      var summary = body.summary || {};
+      var bits = [
+        "Imported " + (summary.totalOrders || 0) + " order" + (summary.totalOrders === 1 ? "" : "s") + " from " + file.name,
+        created + " new row" + (created === 1 ? "" : "s"),
+        updated + " matched to an existing row" + (updated === 1 ? "" : "s")
+      ];
+      if (summary.cancelledOrders) bits.push(summary.cancelledOrders + " fully cancelled");
+      ordersResult.className = "ordersresult";
+      ordersResult.textContent = bits.join(" — ") + ". Total order value: " + formatInr(summary.ordersValueTotal) + ".";
+      refreshStats();
+    } catch (e) {
+      ordersResult.className = "ordersresult err";
+      ordersResult.textContent = "Couldn't import that file — " + (e && e.message ? e.message : "unknown error") + ".";
+    }
+  }
+
+  ordersFileInput.addEventListener("change", function(){
+    var f = ordersFileInput.files && ordersFileInput.files[0];
+    ordersFileInput.value = "";
+    if (f) handleOrdersCsv(f);
+  });
+  ordersDropzone.addEventListener("dragover", function(e){ e.preventDefault(); ordersDropzone.classList.add("drag"); });
+  ["dragleave", "drop"].forEach(function(evt){
+    ordersDropzone.addEventListener(evt, function(e){ e.preventDefault(); ordersDropzone.classList.remove("drag"); });
+  });
+  ordersDropzone.addEventListener("drop", function(e){
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleOrdersCsv(f);
+  });
+  ordersDropzone.addEventListener("click", function(e){
+    if (e.target === ordersFileInput) return;
+    e.preventDefault();
+    ordersFileInput.click();
+  });
+
   addRowBtn.addEventListener("click", function(){
     var id = uid();
     insertRow(id, { fileName: "(manual row)", status: "manual" });
@@ -790,38 +1084,52 @@
 
   function seedExamples(){
     insertRow(uid(), {
-      fileName: "sample-fkmp-invoice.pdf", status: "example",
-      orderId: "TNM-ORD-88213", costCenter: "PUN-RETAIL-01", salesLedger: "Retail Sales - Tyres", voucherType: "Tax Invoice",
-      salesmanName: "Rahul Kadam", leadSource: "Flipkart Ads",
-      crmOrderId: "OD3298471562018400", costPrice: "3450.00", supplierName: "Apollo Tyres Ltd.", dispatchedThrough: "Delhivery",
-      billingCity: "Pune", fsnDetails: "TYRDGH8J3ZQNKMFR", product: "Apollo Amazer 4G Life 175/65 R14",
-      hasOffer: "Yes", tnmDiscount: "200.00", orderDate: "14/08/2026",
-      skuCode: "TNM-APL-AMZ4G-175-65-R14", quantity: "4",
-      totalInvoiceAmount: "15436.00", sellingPricePerItem: "3859.00", preGstPrice: "3270.34",
-      shippingChargePerItem: "0.00", totalInclFkmp: "15436.00",
-      invoiceNo: "TNMFK/26-27/08341", invoiceAmount: "15436.00", tnmBillingInvoiceDate: "08/14/26",
-      taxLedgerCgst: "Output CGST 9%", cgst: "694.86", taxLedgerSgst: "Output SGST 9%", sgst: "694.86",
-      taxLedgerIgst: "", igst: "0.00",
-      buyerName: "Rohan Mehta", shipToName: "Rohan Mehta", addressLine1: "12/4 Lakeview Residency",
-      addressLine2: "Baner Road", city: "Pune", state: "Maharashtra", pinCode: "411045",
-      phoneNo: "98xxxxxx21", emailId: "rohan.m@example.com", hsn: "4011"
+      fileName: "sample-amazon-invoice.pdf", status: "example",
+      crmOrderId: "CRM-88213", salesman: "Rahul Kadam", supplierName: "Apollo Tyres Ltd.",
+      fitmentDeliveryDate: "15/08/2026",
+      orderId: "406-9432208-5153169", orderItemId: "34827195028426",
+      purchaseDate: "12/08/2026", paymentsDate: "13/08/2026", reportingDate: "13/08/2026",
+      promiseDate: "16/08/2026", daysPastPromise: "0",
+      buyerEmail: "y8bqs1bg1tt3vtn@marketplace.amazon.in", buyerName: "Rohan Mehta", buyerPhoneNumber: "98xxxxxx21",
+      sku: "TNM-APL-AMZ4G-175-65-R14", numberOfItems: "1", productName: "Apollo Amazer 4G Life 175/65 R14 Tubeless Car Tyre",
+      quantityPurchased: "4", quantityShipped: "4", quantityToShip: "0", shipServiceLevel: "Standard",
+      recipientName: "Rohan Mehta", shipAddress1: "12/4 Lakeview Residency", shipAddress2: "Baner Road", shipAddress3: "",
+      shipCity: "Pune", shipState: "Maharashtra", shipPostalCode: "411045", shipCountry: "IN",
+      isBusinessOrder: "false", purchaseOrderNumber: "", priceDesignation: "", isPrime: "true",
+      shipmentStatus: "Delivered", isIba: "false", isBuyerRequestedCancellation: "false", buyerRequestedCancelReason: "",
+      vergeOfCancellation: "false", vergeOfLateShipment: "false",
+      handlingTime: "1", effectiveHandlingTime: "1", handlingTimeSource: "Seller",
+      transitTime: "2", transitTimeSource: "Carrier",
+      transitTimeShipFromCity: "Pune", transitTimeShipFromState: "Maharashtra", transitTimeShipFromCountry: "IN",
+      agentName: "Divya Rao", ticketStatus: "Closed", orderStatus: "Shipped", amzPortalMessage: "",
+      wheelBalancingFitmentCharges: "200.00", promishDeliveryDate: "16/08/2026", remarks: "",
+      fitmentDate: "15/08/2026", fulfilmentType: "Seller Fulfilled", actualFitmentDeliveryDate: "15/08/2026",
+      cmRemark: "", deliverBy: "16/08/2026", dateOfOrderAndTime: "12/08/2026 10:22", dateOrder: "12/08/2026",
+      orderValue: "15436.00", accountsRemarks: "TnM invoice raised 15/08"
     });
     insertRow(uid(), {
       fileName: "sample-tnm-billing.pdf", status: "example",
-      orderId: "TNM-ORD-88347", costCenter: "HYD-RETAIL-02", salesLedger: "Retail Sales - Accessories", voucherType: "Tax Invoice",
-      salesmanName: "Divya Rao", leadSource: "Organic search",
-      crmOrderId: "OD3298471562019112", costPrice: "1120.00", supplierName: "JK Tyre & Industries", dispatchedThrough: "Ecom Express",
-      billingCity: "Hyderabad", fsnDetails: "ACCDGH8J3ZRTLQPX", product: "JK Wheel Cover Set 15-inch",
-      hasOffer: "No", tnmDiscount: "0.00", orderDate: "02/09/2026",
-      skuCode: "TNM-JK-WCS15-4PC", quantity: "1",
-      totalInvoiceAmount: "1899.00", sellingPricePerItem: "1899.00", preGstPrice: "1609.32",
-      shippingChargePerItem: "49.00", totalInclFkmp: "1948.00",
-      invoiceNo: "TNMFK/26-27/08512", invoiceAmount: "1899.00", tnmBillingInvoiceDate: "09/02/26",
-      taxLedgerCgst: "Output CGST 9%", cgst: "144.84", taxLedgerSgst: "Output SGST 9%", sgst: "144.84",
-      taxLedgerIgst: "", igst: "0.00",
-      buyerName: "Sana Iqbal", shipToName: "Sana Iqbal", addressLine1: "Flat 302, Silver Oak Apartments",
-      addressLine2: "Banjara Hills", city: "Hyderabad", state: "Telangana", pinCode: "500034",
-      phoneNo: "91xxxxxx47", emailId: "sana.iqbal@example.com", hsn: "6506"
+      crmOrderId: "CRM-88347", salesman: "Divya Rao", supplierName: "JK Tyre & Industries",
+      fitmentDeliveryDate: "03/09/2026",
+      orderId: "406-5217734-9081142", orderItemId: "34991028447319",
+      purchaseDate: "01/09/2026", paymentsDate: "02/09/2026", reportingDate: "02/09/2026",
+      promiseDate: "04/09/2026", daysPastPromise: "0",
+      buyerEmail: "k3nzq8rt2wp9v@marketplace.amazon.in", buyerName: "Sana Iqbal", buyerPhoneNumber: "91xxxxxx47",
+      sku: "TNM-JK-WCS15-4PC", numberOfItems: "1", productName: "JK Wheel Cover Set 15-inch",
+      quantityPurchased: "1", quantityShipped: "1", quantityToShip: "0", shipServiceLevel: "Standard",
+      recipientName: "Sana Iqbal", shipAddress1: "Flat 302, Silver Oak Apartments", shipAddress2: "Banjara Hills", shipAddress3: "",
+      shipCity: "Hyderabad", shipState: "Telangana", shipPostalCode: "500034", shipCountry: "IN",
+      isBusinessOrder: "false", purchaseOrderNumber: "", priceDesignation: "", isPrime: "false",
+      shipmentStatus: "Delivered", isIba: "false", isBuyerRequestedCancellation: "false", buyerRequestedCancelReason: "",
+      vergeOfCancellation: "false", vergeOfLateShipment: "false",
+      handlingTime: "1", effectiveHandlingTime: "1", handlingTimeSource: "Seller",
+      transitTime: "2", transitTimeSource: "Carrier",
+      transitTimeShipFromCity: "Hyderabad", transitTimeShipFromState: "Telangana", transitTimeShipFromCountry: "IN",
+      agentName: "Rahul Kadam", ticketStatus: "Closed", orderStatus: "Shipped", amzPortalMessage: "",
+      wheelBalancingFitmentCharges: "0.00", promishDeliveryDate: "04/09/2026", remarks: "",
+      fitmentDate: "03/09/2026", fulfilmentType: "Seller Fulfilled", actualFitmentDeliveryDate: "03/09/2026",
+      cmRemark: "", deliverBy: "04/09/2026", dateOfOrderAndTime: "01/09/2026 16:05", dateOrder: "01/09/2026",
+      orderValue: "1899.00", accountsRemarks: ""
     });
     clearExamplesBtn.hidden = false;
     refreshStats();
@@ -847,6 +1155,7 @@
     gate.hidden = true;
     app.hidden = false;
     buildHead();
+    fieldCountHint.textContent = COLUMNS.length + " fields · scroll the table sideways to see them all";
     updateBanner();
     seedExamples();
   }
