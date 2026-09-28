@@ -182,7 +182,7 @@
   <label class="dropzone" id="dropzone" for="fileInput">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <strong>Drop invoice PDFs here, or click to browse</strong>
-    <span>PDFs, or a .zip of PDFs (e.g. an Amazon bulk invoice download) &middot; each PDF is stored and linked, its text is used to auto-fill fields</span>
+    <span>PDFs, or a .zip of PDFs (e.g. an Amazon bulk invoice download) &middot; each PDF is stored and linked, its text is used to auto-fill fields &middot; Seller Flex invoices only for now (others are rejected before upload &mdash; no cost, nothing saved)</span>
     <input type="file" id="fileInput" accept="application/pdf,.zip,application/zip" multiple>
   </label>
 
@@ -233,10 +233,7 @@
   // whatever the client sends for it anyway).
   var COLUMNS = [
     { key:"orderStatus",         label:"Order Status",                 team:"OPS",      cls:"",     w:14, formula:true },
-    { key:"crmOrderId",          label:"CRM Order ID",                 team:"MP Team",  cls:"mono", w:16 },
-    { key:"salesman",            label:"Salesman",                     team:"Sales",    cls:"",     w:16 },
     { key:"supplierName",        label:"Supplier Name",                team:"Sales",    cls:"",     w:20 },
-    { key:"fitmentDeliveryDate", label:"Fitmate Date / Delivery Date", team:"OPS",      cls:"mono", w:16 },
     { key:"taxableValue",        label:"Taxable value",                team:"Accounts", cls:"num",  w:12 },
     { key:"invoiceValue",        label:"Invoice value",                team:"Accounts", cls:"num",  w:12 },
     { key:"igst",                label:"IGST",                         team:"Accounts", cls:"num",  w:10 },
@@ -416,8 +413,10 @@
           // re-importing the same order) on a later day resolves to the
           // SAME key, so it updates that existing Sheet row instead of
           // appending a duplicate. Safe to do here because this always runs
-          // before the row's first sync is scheduled (see call sites).
-          if (r) r.rowKey = "order:" + orderIdVal;
+          // before the row's first sync is scheduled (see call sites). The
+          // Row Key column is just the bare order ID — no prefix — so it
+          // reads the same as the order-id column next to it.
+          if (r) { r.rowKey = orderIdVal; r.rowKeyResolved = true; }
         }
       }
     });
@@ -505,6 +504,12 @@
     var r = {
       id:id, rowKey: opts.rowKey || makeRowKey(), fileName: opts.fileName || "(manual row)", status: opts.status || "manual",
       rawText:"", fileLink: opts.fileLink || "", syncState: "idle",
+      // True once this row's Sheet key has been set to its real order ID
+      // (see applyFieldsToInputs) rather than its throwaway starting key —
+      // tracked as its own flag rather than inferred from the key's string
+      // shape, so the duplicate-row guard in uploadFileToDrive doesn't
+      // depend on what the key happens to look like.
+      rowKeyResolved: false,
       autoFields: new Set(), lockedFields: new Set()
     };
     rows.set(id, r);
@@ -806,16 +811,44 @@
       // "order:<id>" and synced AGAIN, which — since findRowByKey looks
       // rows up by that new key — couldn't find the row it had just
       // created and appended a second, complete one instead. One upload,
-      // two Sheet rows, one of them permanently blank. Skipping the sync
-      // here while extraction is still in flight avoids creating that
-      // stray row in the first place; the fileLink is already on `r`, so
-      // extraction's own sync (scheduleSync in runExtraction /
-      // mergeExtractedRowIntoExisting) picks it up once the row's real key
-      // is settled.
-      if (r.status !== "reading" && r.status !== "extracting") {
+      // two Sheet rows, one of them permanently blank.
+      //
+      // Gating this on r.status (only skip while "reading"/"extracting")
+      // wasn't quite enough: an invoice extraction can also legitimately
+      // fail — a PDF with no readable order ID, a rate limit, an upstream
+      // error — landing the row in a terminal "error"/"manual" status
+      // while it's STILL keyed by its throwaway random UUID, with nobody
+      // having typed anything into it yet. The moment the file link
+      // arrived after that, the same stray-row problem happened again,
+      // just via a different route. The real invariant is about the row's
+      // KEY, not its extraction status: only let this trigger a sync once
+      // the row has a stable Sheet identity — either extraction resolved
+      // its key to the real order ID, or a previous sync already created a
+      // Sheet row under whatever key it currently has. Otherwise the file link
+      // just sits on `r` and rides along on whichever sync happens next —
+      // extraction's own (runExtraction / mergeExtractedRowIntoExisting),
+      // or the row's own "input" listener the moment someone types
+      // something into it — instead of writing a new, nearly-empty row
+      // under a key nothing will ever find again.
+      if (r.rowKeyResolved || r.syncState === "ok") {
         scheduleSync(realId);
       }
     } catch (e) { /* leave file unlinked; row still has its data */ }
+  }
+
+  // Restricted to Seller Flex invoices for now (Manoj's call, 2026-09-28) —
+  // every Seller Flex tax invoice's Invoice Number / Invoice Details carries
+  // a "JJGZ" marker (e.g. "Invoice Number :JJGZ-179"), so this is a cheap,
+  // no-AI-call way to tell a Seller Flex invoice apart from anything else
+  // before the team is ready to expand the tool beyond it. Checked against
+  // the PDF's own extracted text (free, client-side) BEFORE either the
+  // paid AI extraction call or the Drive upload happen, so a disallowed
+  // invoice costs nothing and never lands in Drive or the Sheet — just a
+  // rejection message on its row. Case-insensitive since text extraction
+  // doesn't guarantee original casing survives.
+  var ALLOWED_INVOICE_MARKER = /jjgz/i;
+  function isAllowedInvoice(text){
+    return ALLOWED_INVOICE_MARKER.test(text || "");
   }
 
   async function processFile(file){
@@ -824,8 +857,6 @@
     insertRow(id, { fileName: file.name, status: "reading" });
     ensureExamplesCleared();
     setChip(id);
-
-    uploadFileToDrive(id, file); // fire-and-forget; doesn't block field extraction
 
     var r = rows.get(id), el = rowEls.get(id);
     var text = "";
@@ -843,6 +874,23 @@
     r.rawText = text;
     el.pre.textContent = text.trim() ? text : "(no extractable text found in this PDF — it may be a scanned image)";
     showSourceToggle(id);
+
+    // Only reject on the Seller Flex check when there's actual text to
+    // check — a blank/unreadable PDF (a scan, say) isn't necessarily a
+    // non-Seller-Flex invoice, it just couldn't be read, so that case is
+    // left to fall through to the existing "no extractable text" handling
+    // below instead of being misreported as the wrong invoice type.
+    if (text.trim() && !isAllowedInvoice(text)) {
+      r.status = "error";
+      setChip(id);
+      el.errDiv.textContent = "This isn't a Seller Flex invoice, so it isn't allowed here yet — only Seller Flex invoices (invoices with a \"JJGZ\" invoice number) can be uploaded. We can expand this to other invoice types later.";
+      el.retryBtn.style.display = "none";
+      el.detailTr.hidden = false;
+      refreshStats();
+      return;
+    }
+
+    uploadFileToDrive(id, file); // fire-and-forget; doesn't block field extraction
 
     await runExtraction(id, text);
   }
@@ -1092,8 +1140,7 @@
     insertRow(uid(), {
       fileName: "sample-amazon-invoice.pdf", status: "example",
       orderStatus: "Shipped",
-      crmOrderId: "CRM-88213", salesman: "Rahul Kadam", supplierName: "Apollo Tyres Ltd.",
-      fitmentDeliveryDate: "15/08/2026",
+      supplierName: "Apollo Tyres Ltd.",
       taxableValue: "13081.36", invoiceValue: "15436.00", igst: "0.00", cgst: "1177.32", sgst: "1177.32",
       orderId: "406-9432208-5153169", orderItemId: "34827195028426",
       purchaseDate: "12/08/2026", paymentsDate: "13/08/2026",
@@ -1107,8 +1154,7 @@
     insertRow(uid(), {
       fileName: "sample-tnm-billing.pdf", status: "example",
       orderStatus: "Packed",
-      crmOrderId: "CRM-88347", salesman: "Divya Rao", supplierName: "JK Tyre & Industries",
-      fitmentDeliveryDate: "03/09/2026",
+      supplierName: "JK Tyre & Industries",
       taxableValue: "1609.32", invoiceValue: "1899.00", igst: "289.68", cgst: "0.00", sgst: "0.00",
       orderId: "406-5217734-9081142", orderItemId: "34991028447319",
       purchaseDate: "01/09/2026", paymentsDate: "02/09/2026",
