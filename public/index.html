@@ -94,8 +94,16 @@
   td input:disabled{ color:var(--text-muted); cursor:not-allowed; }
   td.num input, td.mono input{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
   td.file{ max-width:180px; }
-  td.fieldcell{ display:flex; align-items:center; gap:2px; }
-  td.fieldcell input{ width:auto; min-width:0; flex:1 1 auto; }
+  /* The input + unlock-icon pair inside each field cell used to be laid
+     out with `display:flex` directly on the <td> itself. A <td> with a
+     non-table `display` stops participating in the table's column-width
+     tracking in most browsers, so every one of these cells collapsed onto
+     the same spot instead of keeping its own column — the flex layout
+     lives on an inner wrapper div instead so the <td> stays a normal
+     table cell. */
+  td.fieldcell{ padding:0; }
+  .fieldcell-inner{ display:flex; align-items:center; gap:2px; padding:5px 8px; width:100%; box-sizing:border-box; }
+  .fieldcell-inner input{ width:auto; min-width:0; flex:1 1 auto; }
   .unlockbtn{ display:none; flex:0 0 auto; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-muted); font-size:11px; width:20px; height:20px; padding:0; border-radius:6px; cursor:pointer; }
   .unlockbtn.show{ display:inline-flex; }
   .unlockbtn:hover{ background:var(--surface-2); color:var(--text); }
@@ -521,6 +529,8 @@
     COLUMNS.forEach(function(c){
       var td = document.createElement("td");
       td.className = (c.cls ? c.cls + " " : "") + "fieldcell";
+      var inner = document.createElement("div");
+      inner.className = "fieldcell-inner";
       var input = document.createElement("input");
       input.type = "text";
       input.id = "f-" + c.key + "-" + id;
@@ -546,8 +556,9 @@
       unlockBtn.title = "This field was filled in automatically — click to unlock and edit it";
       unlockBtn.innerHTML = "&#128274;";
       unlockBtn.addEventListener("click", function(){ unlockField(id, c.key); });
-      td.appendChild(input);
-      if (!c.formula) td.appendChild(unlockBtn);
+      inner.appendChild(input);
+      if (!c.formula) inner.appendChild(unlockBtn);
+      td.appendChild(inner);
       tr.appendChild(td);
       inputs[c.key] = input;
       unlockBtns[c.key] = unlockBtn;
@@ -658,6 +669,36 @@
     refreshStats();
   }
 
+  // pdf.js hands back text items in whatever order the PDF's content stream
+  // happens to store them in, which for a table (like an invoice's tax
+  // breakup — unit price / discount / qty / net amount / tax rate / tax
+  // type / tax amount / total amount, one column per cell) is not
+  // necessarily left-to-right, top-to-bottom order. Joining items as-is can
+  // still keep a table roughly readable, but there's no guarantee of it —
+  // this instead groups items into lines by their y-position (from
+  // item.transform[5], the item's vertical baseline) and sorts each line
+  // left-to-right by x, the same idea `pdftotext -layout` uses, so a table
+  // row reads as one line with its columns in visual order, and the AI
+  // extractor gets a much more reliable table to read amounts out of.
+  function reconstructPageText(items){
+    var lines = [];
+    items.forEach(function(it){
+      if (!it.str) return;
+      var y = it.transform[5];
+      var line = null;
+      for (var i = 0; i < lines.length; i++) {
+        if (Math.abs(lines[i].y - y) < 3) { line = lines[i]; break; }
+      }
+      if (!line) { line = { y: y, cells: [] }; lines.push(line); }
+      line.cells.push({ x: it.transform[4], str: it.str });
+    });
+    lines.sort(function(a, b){ return b.y - a.y; }); // PDF y grows upward — top of page first
+    return lines.map(function(l){
+      l.cells.sort(function(a, b){ return a.x - b.x; });
+      return l.cells.map(function(c){ return c.str; }).join(" ").replace(/\s+/g, " ").trim();
+    }).filter(function(s){ return s.length > 0; }).join("\n");
+  }
+
   async function extractPdfText(file){
     var buf = await file.arrayBuffer();
     var doc = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -666,7 +707,7 @@
     for (var i = 1; i <= pages; i++) {
       var page = await doc.getPage(i);
       var content = await page.getTextContent();
-      parts.push(content.items.map(function(it){ return it.str; }).join(" "));
+      parts.push(reconstructPageText(content.items));
     }
     return parts.join("\n\n");
   }
@@ -682,6 +723,20 @@
   // wrapped in try/catch: if it's unavailable, full, or throws for any
   // reason, extraction just proceeds normally with no cache.
   var EXTRACT_CACHE_PREFIX = "tnm-extract-cache:";
+  // Bump this whenever the set of fields asked of the AI extractor changes
+  // (server's DERIVABLE_KEYS). The cache key used to be just a hash of the
+  // extracted PDF text, with nothing tying it to which fields were being
+  // asked for — so a cached response saved under an older schema kept
+  // getting replayed forever afterwards for that same PDF, silently missing
+  // whatever fields were added since, with no error or indication anything
+  // was stale. This is exactly what made Taxable value/Invoice value/IGST/
+  // CGST/SGST show up blank for invoices that had already been uploaded
+  // once before those 5 fields existed: re-uploading the same PDF kept
+  // reusing the old cached JSON instead of calling the AI again. Baking a
+  // version string into the hash means a schema change invalidates every
+  // old entry at once, with no need to clear anyone's browser storage by
+  // hand.
+  var EXTRACT_SCHEMA_VERSION = "2026-09-28-taxfields";
   async function sha256Hex(str){
     var enc = new TextEncoder().encode(str);
     var buf = await crypto.subtle.digest("SHA-256", enc);
@@ -691,7 +746,7 @@
   async function getCachedExtraction(textForApi){
     if (!(window.crypto && crypto.subtle)) return null;
     try {
-      var hash = await sha256Hex(textForApi);
+      var hash = await sha256Hex(EXTRACT_SCHEMA_VERSION + "\n" + textForApi);
       var raw = localStorage.getItem(EXTRACT_CACHE_PREFIX + hash);
       return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
@@ -699,7 +754,7 @@
   async function setCachedExtraction(textForApi, data){
     if (!(window.crypto && crypto.subtle)) return;
     try {
-      var hash = await sha256Hex(textForApi);
+      var hash = await sha256Hex(EXTRACT_SCHEMA_VERSION + "\n" + textForApi);
       localStorage.setItem(EXTRACT_CACHE_PREFIX + hash, JSON.stringify(data));
     } catch (e) { /* quota exceeded or storage unavailable — skip caching */ }
   }
