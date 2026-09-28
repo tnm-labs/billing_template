@@ -27,9 +27,19 @@ if (!apiKey) {
 const anthropic = apiKey ? new Anthropic({ apiKey }) : null;
 
 // ---- tiny in-memory per-IP rate limiter (resets on restart; fine for a small internal tool) ----
+// 20/min was too tight for real usage: a bulk .zip upload processes 2
+// invoices at a time (see the client's worker pool), so a batch of
+// several dozen invoices could burn through 20 extraction calls in well
+// under a minute and start getting 429'd — which, before the client
+// gained automatic retry-on-rate-limit, silently left several invoices
+// out of a batch with no error the uploader would necessarily notice
+// (confirmed: 11 of 49 genuine invoices in one real bulk upload). Raised
+// to comfortably cover a 100-ish-invoice batch; a runaway bug would still
+// be capped at a few dollars/minute of AI cost at this level, which is
+// an acceptable trade-off for a small internal tool.
 const hits = new Map();
 const WINDOW_MS = 60 * 1000;
-const MAX_PER_WINDOW = 20;
+const MAX_PER_WINDOW = 100;
 function isRateLimited(ip) {
   const now = Date.now();
   const entry = hits.get(ip) || { count: 0, reset: now + WINDOW_MS };
