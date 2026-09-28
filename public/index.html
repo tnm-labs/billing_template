@@ -199,7 +199,7 @@
   <label class="dropzone" id="ordersDropzone" for="ordersFileInput">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
     <strong>Upload the Seller Flex &ldquo;all orders&rdquo; CSV</strong>
-    <span>Order Status and Order Value fill in for every order in the file &mdash; new rows are created for orders that don't have an invoice yet, and matched into existing rows by order ID for ones that do</span>
+    <span>Updates the "All orders" tab directly, one row per order, matched or created by order ID &mdash; the master record for every order whether or not it has a TnM invoice yet. The Invoices tab's Order Status looks this tab up automatically, so nothing here needs uploading again to catch a status change.</span>
     <input type="file" id="ordersFileInput" accept=".csv,text/csv">
   </label>
   <div class="ordersresult" id="ordersResult" hidden></div>
@@ -237,72 +237,45 @@
   }
 
   // Mirrors the COLUMNS array in server.js — keep the two in sync.
+  // orderStatus is `formula:true`: the Sheet fills that cell with a live
+  // VLOOKUP into the "All orders" tab, so its input is always disabled
+  // here and never sent as a value worth acting on (the server ignores
+  // whatever the client sends for it anyway).
   var COLUMNS = [
-    { key:"crmOrderId",                   label:"CRM Order ID",                            team:"MP Team",  cls:"mono", w:16 },
-    { key:"salesman",                     label:"Salesman",                                team:"Sales",    cls:"",     w:16 },
-    { key:"supplierName",                 label:"Supplier Name",                           team:"Sales",    cls:"",     w:20 },
-    { key:"fitmentDeliveryDate",          label:"Fitmate Date / Delivery Date",            team:"OPS",      cls:"mono", w:16 },
-    { key:"orderId",                      label:"order-id",                                team:"MP Team",  cls:"mono", w:20 },
-    { key:"orderItemId",                  label:"order-item-id",                           team:"MP Team",  cls:"mono", w:16 },
-    { key:"purchaseDate",                 label:"purchase-date",                           team:"MP Team",  cls:"mono", w:12 },
-    { key:"paymentsDate",                 label:"payments-date",                           team:"Accounts", cls:"mono", w:12 },
-    { key:"reportingDate",                label:"reporting-date",                          team:"Accounts", cls:"mono", w:12 },
-    { key:"promiseDate",                  label:"promise-date",                            team:"OPS",      cls:"mono", w:12 },
-    { key:"daysPastPromise",              label:"days-past-promise",                       team:"OPS",      cls:"num",  w:10 },
-    { key:"buyerEmail",                   label:"buyer-email",                             team:"Sales",    cls:"mono", w:22 },
-    { key:"buyerName",                    label:"buyer-name",                              team:"Sales",    cls:"",     w:20 },
-    { key:"buyerPhoneNumber",             label:"buyer-phone-number",                      team:"Sales",    cls:"mono", w:14 },
-    { key:"sku",                          label:"sku",                                     team:"Sales",    cls:"mono", w:16 },
-    { key:"numberOfItems",                label:"number-of-items",                         team:"Sales",    cls:"num",  w:10 },
-    { key:"productName",                  label:"product-name",                            team:"Sales",    cls:"",     w:26 },
-    { key:"quantityPurchased",            label:"quantity-purchased",                      team:"Sales",    cls:"num",  w:10 },
-    { key:"quantityShipped",              label:"quantity-shipped",                        team:"OPS",      cls:"num",  w:10 },
-    { key:"quantityToShip",               label:"quantity-to-ship",                        team:"OPS",      cls:"num",  w:10 },
-    { key:"shipServiceLevel",             label:"ship-service-level",                      team:"OPS",      cls:"",     w:14 },
-    { key:"recipientName",                label:"recipient-name",                          team:"Sales",    cls:"",     w:20 },
-    { key:"shipAddress1",                 label:"ship-address-1",                          team:"Sales",    cls:"",     w:26 },
-    { key:"shipAddress2",                 label:"ship-address-2",                          team:"Sales",    cls:"",     w:22 },
-    { key:"shipAddress3",                 label:"ship-address-3",                          team:"Sales",    cls:"",     w:22 },
-    { key:"shipCity",                     label:"ship-city",                               team:"Sales",    cls:"",     w:14 },
-    { key:"shipState",                    label:"ship-state",                              team:"Sales",    cls:"",     w:14 },
-    { key:"shipPostalCode",               label:"ship-postal-code",                        team:"Sales",    cls:"mono", w:11 },
-    { key:"shipCountry",                  label:"ship-country",                            team:"Sales",    cls:"",     w:11 },
-    { key:"isBusinessOrder",              label:"is-business-order",                       team:"MP Team",  cls:"",     w:11 },
-    { key:"purchaseOrderNumber",          label:"purchase-order-number",                   team:"MP Team",  cls:"mono", w:16 },
-    { key:"priceDesignation",             label:"price-designation",                       team:"MP Team",  cls:"",     w:14 },
-    { key:"isPrime",                      label:"is-prime",                                team:"MP Team",  cls:"",     w:8  },
-    { key:"shipmentStatus",               label:"shipment-status",                         team:"OPS",      cls:"",     w:14 },
-    { key:"isIba",                        label:"is-iba",                                  team:"MP Team",  cls:"",     w:8  },
-    { key:"isBuyerRequestedCancellation", label:"is-buyer-requested-cancellation",         team:"MP Team",  cls:"",     w:14 },
-    { key:"buyerRequestedCancelReason",   label:"buyer-requested-cancel-reason",           team:"MP Team",  cls:"",     w:18 },
-    { key:"vergeOfCancellation",          label:"verge-of-cancellation",                   team:"OPS",      cls:"",     w:14 },
-    { key:"vergeOfLateShipment",          label:"verge-of-lateShipment",                   team:"OPS",      cls:"",     w:14 },
-    { key:"handlingTime",                 label:"handling-time",                           team:"OPS",      cls:"num",  w:10 },
-    { key:"effectiveHandlingTime",        label:"effective-handling-time",                 team:"OPS",      cls:"num",  w:12 },
-    { key:"handlingTimeSource",           label:"handling-time-source",                    team:"OPS",      cls:"",     w:14 },
-    { key:"transitTime",                  label:"transit-time",                            team:"OPS",      cls:"num",  w:10 },
-    { key:"transitTimeSource",            label:"transit-time-source",                     team:"OPS",      cls:"",     w:14 },
-    { key:"transitTimeShipFromCity",      label:"transit-time-ship-from-city",             team:"OPS",      cls:"",     w:16 },
-    { key:"transitTimeShipFromState",     label:"transit-time-ship-from-state",            team:"OPS",      cls:"",     w:16 },
-    { key:"transitTimeShipFromCountry",   label:"transit-time-ship-from-country",          team:"OPS",      cls:"",     w:16 },
-    { key:"agentName",                    label:"Agent Name",                              team:"OPS",      cls:"",     w:16 },
-    { key:"ticketStatus",                 label:"Ticket Status",                           team:"OPS",      cls:"",     w:14 },
-    { key:"orderStatus",                  label:"Order Status",                            team:"OPS",      cls:"",     w:14 },
-    { key:"amzPortalMessage",             label:"AMZ Portal message/Hardik Email",         team:"OPS",      cls:"",     w:24 },
-    { key:"wheelBalancingFitmentCharges", label:"Wheel balancing/Fitment charges",         team:"Accounts", cls:"num",  w:16 },
-    { key:"promishDeliveryDate",          label:"Promish Delivery Date",                   team:"OPS",      cls:"mono", w:14 },
-    { key:"remarks",                      label:"Remarks",                                 team:"OPS",      cls:"",     w:22 },
-    { key:"fitmentDate",                  label:"Fitment Date (Double click)",             team:"OPS",      cls:"mono", w:16 },
-    { key:"fulfilmentType",               label:"FULFILMENT TYPE",                         team:"OPS",      cls:"",     w:14 },
-    { key:"actualFitmentDeliveryDate",    label:"Actual Fitment/Delivery Date",            team:"OPS",      cls:"mono", w:16 },
-    { key:"cmRemark",                     label:"CM Remark",                               team:"OPS",      cls:"",     w:18 },
-    { key:"deliverBy",                    label:"Deliver by:",                             team:"OPS",      cls:"mono", w:12 },
-    { key:"dateOfOrderAndTime",           label:"Date of Order and time",                  team:"MP Team",  cls:"mono", w:16 },
-    { key:"dateOrder",                    label:"Date Order",                              team:"MP Team",  cls:"mono", w:12 },
-    { key:"orderValue",                   label:"Order Value (Seller Flex)",               team:"Accounts", cls:"num",  w:14 },
-    { key:"accountsRemarks",              label:"Accounts Remarks",                        team:"Accounts", cls:"",     w:24 }
+    { key:"orderStatus",         label:"Order Status",                 team:"OPS",      cls:"",     w:14, formula:true },
+    { key:"crmOrderId",          label:"CRM Order ID",                 team:"MP Team",  cls:"mono", w:16 },
+    { key:"salesman",            label:"Salesman",                     team:"Sales",    cls:"",     w:16 },
+    { key:"supplierName",        label:"Supplier Name",                team:"Sales",    cls:"",     w:20 },
+    { key:"fitmentDeliveryDate", label:"Fitmate Date / Delivery Date", team:"OPS",      cls:"mono", w:16 },
+    { key:"taxableValue",        label:"Taxable value",                team:"Accounts", cls:"num",  w:12 },
+    { key:"invoiceValue",        label:"Invoice value",                team:"Accounts", cls:"num",  w:12 },
+    { key:"igst",                label:"IGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"cgst",                label:"CGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"sgst",                label:"SGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"orderId",             label:"order-id",                     team:"MP Team",  cls:"mono", w:20 },
+    { key:"orderItemId",         label:"order-item-id",                team:"MP Team",  cls:"mono", w:16 },
+    { key:"purchaseDate",        label:"purchase-date",                team:"MP Team",  cls:"mono", w:12 },
+    { key:"paymentsDate",        label:"payments-date",                team:"Accounts", cls:"mono", w:12 },
+    { key:"buyerName",           label:"buyer-name",                   team:"Sales",    cls:"",     w:20 },
+    { key:"buyerPhoneNumber",    label:"buyer-phone-number",           team:"Sales",    cls:"mono", w:14 },
+    { key:"sku",                 label:"sku",                          team:"Sales",    cls:"mono", w:16 },
+    { key:"numberOfItems",       label:"number-of-items",              team:"Sales",    cls:"num",  w:10 },
+    { key:"productName",         label:"product-name",                 team:"Sales",    cls:"",     w:26 },
+    { key:"quantityPurchased",   label:"quantity-purchased",           team:"Sales",    cls:"num",  w:10 },
+    { key:"quantityShipped",     label:"quantity-shipped",             team:"OPS",      cls:"num",  w:10 },
+    { key:"quantityToShip",      label:"quantity-to-ship",             team:"OPS",      cls:"num",  w:10 },
+    { key:"shipServiceLevel",    label:"ship-service-level",           team:"OPS",      cls:"",     w:14 },
+    { key:"recipientName",       label:"recipient-name",               team:"Sales",    cls:"",     w:20 },
+    { key:"shipAddress1",        label:"ship-address-1",               team:"Sales",    cls:"",     w:26 },
+    { key:"shipAddress2",        label:"ship-address-2",               team:"Sales",    cls:"",     w:22 },
+    { key:"shipAddress3",        label:"ship-address-3",               team:"Sales",    cls:"",     w:22 },
+    { key:"shipCity",            label:"ship-city",                    team:"Sales",    cls:"",     w:14 },
+    { key:"shipState",           label:"ship-state",                   team:"Sales",    cls:"",     w:14 },
+    { key:"shipPostalCode",      label:"ship-postal-code",             team:"Sales",    cls:"mono", w:11 },
+    { key:"accountsRemarks",     label:"Accounts Remarks",             team:"Accounts", cls:"",     w:24 }
   ];
   var FIELDS = COLUMNS.map(function(c){ return c.key; });
+  var FORMULA_KEYS = new Set(COLUMNS.filter(function(c){ return c.formula; }).map(function(c){ return c.key; }));
   var META_COLS = 4;
 
   var gate = document.getElementById("gate");
@@ -403,7 +376,7 @@
     rows.forEach(function(r){
       if (r.status === "example") return;
       if (r.status === "extracted") auto += 1;
-      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading" || r.status === "orderOnly") review += 1;
+      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading") review += 1;
       if (r.syncState === "ok") synced += 1;
     });
     statUploaded.textContent = uploadedCount;
@@ -422,7 +395,6 @@
       extracting: ["chip busy", '<span class="spin"></span> Extracting'],
       extracted: ["chip ok", "Extracted"],
       manual: ["chip manual", "Manual entry"],
-      orderOnly: ["chip manual", "Order received — no invoice yet"],
       error: ["chip err", "Needs attention"]
     };
     var m = map[r.status] || map.manual;
@@ -481,6 +453,7 @@
     var r = rows.get(id), el = rowEls.get(id);
     if (!r || !el) return;
     Object.keys(el.inputs).forEach(function(key){
+      if (FORMULA_KEYS.has(key)) return; // always disabled, never lock-managed
       var locked = r.lockedFields.has(key);
       el.inputs[key].disabled = locked;
       var btn = el.unlockBtns[key];
@@ -588,10 +561,19 @@
       input.value = opts[c.key] || "";
       input.autocomplete = "off";
       input.style.minWidth = chWidth(c.w) + "px";
-      input.addEventListener("input", function(){
-        if (c.key === "orderId" && input.value.trim()) orderIdIndex.set(input.value.trim(), id);
-        scheduleSync(id);
-      });
+      if (c.formula) {
+        // Order Status is looked up live in the Sheet itself (see
+        // orderStatusFormula in server.js) — nobody types into this one,
+        // here or there, so it's disabled from the start and gets no
+        // unlock button at all.
+        input.disabled = true;
+        input.placeholder = "(from All orders)";
+      } else {
+        input.addEventListener("input", function(){
+          if (c.key === "orderId" && input.value.trim()) orderIdIndex.set(input.value.trim(), id);
+          scheduleSync(id);
+        });
+      }
       var unlockBtn = document.createElement("button");
       unlockBtn.type = "button";
       unlockBtn.className = "unlockbtn";
@@ -599,7 +581,7 @@
       unlockBtn.innerHTML = "&#128274;";
       unlockBtn.addEventListener("click", function(){ unlockField(id, c.key); });
       td.appendChild(input);
-      td.appendChild(unlockBtn);
+      if (!c.formula) td.appendChild(unlockBtn);
       tr.appendChild(td);
       inputs[c.key] = input;
       unlockBtns[c.key] = unlockBtn;
@@ -991,34 +973,19 @@
       try { body = await res.json(); } catch (e) { /* ignore */ }
       if (!res.ok) throw new Error((body && body.message) || (body && body.error) || ("http_" + res.status));
 
-      ensureExamplesCleared();
-      var created = 0, updated = 0;
-      (body.orders || []).forEach(function(order){
-        var existingId = orderIdIndex.get(order.orderId);
-        var id;
-        if (existingId && rows.has(existingId)) {
-          id = existingId;
-          updated += 1;
-        } else {
-          id = uid();
-          insertRow(id, { fileName: "(Seller Flex order — no invoice yet)", status: "orderOnly" });
-          created += 1;
-        }
-        applyFieldsToInputs(id, order, true);
-        setChip(id);
-        scheduleSync(id);
-      });
-
+      // The server does the aggregating AND the "All orders" tab upsert in
+      // one round trip now — orders never touch this page's row table at
+      // all (that's only ever populated from invoice PDFs). This just
+      // reports what happened.
       var summary = body.summary || {};
       var bits = [
         "Imported " + (summary.totalOrders || 0) + " order" + (summary.totalOrders === 1 ? "" : "s") + " from " + file.name,
-        created + " new row" + (created === 1 ? "" : "s"),
-        updated + " matched to an existing row" + (updated === 1 ? "" : "s")
+        (summary.created || 0) + " new row" + (summary.created === 1 ? "" : "s") + " in All orders",
+        (summary.updated || 0) + " existing row" + (summary.updated === 1 ? "" : "s") + " updated"
       ];
       if (summary.cancelledOrders) bits.push(summary.cancelledOrders + " fully cancelled");
       ordersResult.className = "ordersresult";
       ordersResult.textContent = bits.join(" — ") + ". Total order value: " + formatInr(summary.ordersValueTotal) + ".";
-      refreshStats();
     } catch (e) {
       ordersResult.className = "ordersresult err";
       ordersResult.textContent = "Couldn't import that file — " + (e && e.message ? e.message : "unknown error") + ".";
@@ -1085,51 +1052,33 @@
   function seedExamples(){
     insertRow(uid(), {
       fileName: "sample-amazon-invoice.pdf", status: "example",
+      orderStatus: "Shipped",
       crmOrderId: "CRM-88213", salesman: "Rahul Kadam", supplierName: "Apollo Tyres Ltd.",
       fitmentDeliveryDate: "15/08/2026",
+      taxableValue: "13081.36", invoiceValue: "15436.00", igst: "0.00", cgst: "1177.32", sgst: "1177.32",
       orderId: "406-9432208-5153169", orderItemId: "34827195028426",
-      purchaseDate: "12/08/2026", paymentsDate: "13/08/2026", reportingDate: "13/08/2026",
-      promiseDate: "16/08/2026", daysPastPromise: "0",
-      buyerEmail: "y8bqs1bg1tt3vtn@marketplace.amazon.in", buyerName: "Rohan Mehta", buyerPhoneNumber: "98xxxxxx21",
+      purchaseDate: "12/08/2026", paymentsDate: "13/08/2026",
+      buyerName: "Rohan Mehta", buyerPhoneNumber: "98xxxxxx21",
       sku: "TNM-APL-AMZ4G-175-65-R14", numberOfItems: "1", productName: "Apollo Amazer 4G Life 175/65 R14 Tubeless Car Tyre",
       quantityPurchased: "4", quantityShipped: "4", quantityToShip: "0", shipServiceLevel: "Standard",
       recipientName: "Rohan Mehta", shipAddress1: "12/4 Lakeview Residency", shipAddress2: "Baner Road", shipAddress3: "",
-      shipCity: "Pune", shipState: "Maharashtra", shipPostalCode: "411045", shipCountry: "IN",
-      isBusinessOrder: "false", purchaseOrderNumber: "", priceDesignation: "", isPrime: "true",
-      shipmentStatus: "Delivered", isIba: "false", isBuyerRequestedCancellation: "false", buyerRequestedCancelReason: "",
-      vergeOfCancellation: "false", vergeOfLateShipment: "false",
-      handlingTime: "1", effectiveHandlingTime: "1", handlingTimeSource: "Seller",
-      transitTime: "2", transitTimeSource: "Carrier",
-      transitTimeShipFromCity: "Pune", transitTimeShipFromState: "Maharashtra", transitTimeShipFromCountry: "IN",
-      agentName: "Divya Rao", ticketStatus: "Closed", orderStatus: "Shipped", amzPortalMessage: "",
-      wheelBalancingFitmentCharges: "200.00", promishDeliveryDate: "16/08/2026", remarks: "",
-      fitmentDate: "15/08/2026", fulfilmentType: "Seller Fulfilled", actualFitmentDeliveryDate: "15/08/2026",
-      cmRemark: "", deliverBy: "16/08/2026", dateOfOrderAndTime: "12/08/2026 10:22", dateOrder: "12/08/2026",
-      orderValue: "15436.00", accountsRemarks: "TnM invoice raised 15/08"
+      shipCity: "Pune", shipState: "Maharashtra", shipPostalCode: "411045",
+      accountsRemarks: "TnM invoice raised 15/08"
     });
     insertRow(uid(), {
       fileName: "sample-tnm-billing.pdf", status: "example",
+      orderStatus: "Packed",
       crmOrderId: "CRM-88347", salesman: "Divya Rao", supplierName: "JK Tyre & Industries",
       fitmentDeliveryDate: "03/09/2026",
+      taxableValue: "1609.32", invoiceValue: "1899.00", igst: "289.68", cgst: "0.00", sgst: "0.00",
       orderId: "406-5217734-9081142", orderItemId: "34991028447319",
-      purchaseDate: "01/09/2026", paymentsDate: "02/09/2026", reportingDate: "02/09/2026",
-      promiseDate: "04/09/2026", daysPastPromise: "0",
-      buyerEmail: "k3nzq8rt2wp9v@marketplace.amazon.in", buyerName: "Sana Iqbal", buyerPhoneNumber: "91xxxxxx47",
+      purchaseDate: "01/09/2026", paymentsDate: "02/09/2026",
+      buyerName: "Sana Iqbal", buyerPhoneNumber: "91xxxxxx47",
       sku: "TNM-JK-WCS15-4PC", numberOfItems: "1", productName: "JK Wheel Cover Set 15-inch",
       quantityPurchased: "1", quantityShipped: "1", quantityToShip: "0", shipServiceLevel: "Standard",
       recipientName: "Sana Iqbal", shipAddress1: "Flat 302, Silver Oak Apartments", shipAddress2: "Banjara Hills", shipAddress3: "",
-      shipCity: "Hyderabad", shipState: "Telangana", shipPostalCode: "500034", shipCountry: "IN",
-      isBusinessOrder: "false", purchaseOrderNumber: "", priceDesignation: "", isPrime: "false",
-      shipmentStatus: "Delivered", isIba: "false", isBuyerRequestedCancellation: "false", buyerRequestedCancelReason: "",
-      vergeOfCancellation: "false", vergeOfLateShipment: "false",
-      handlingTime: "1", effectiveHandlingTime: "1", handlingTimeSource: "Seller",
-      transitTime: "2", transitTimeSource: "Carrier",
-      transitTimeShipFromCity: "Hyderabad", transitTimeShipFromState: "Telangana", transitTimeShipFromCountry: "IN",
-      agentName: "Rahul Kadam", ticketStatus: "Closed", orderStatus: "Shipped", amzPortalMessage: "",
-      wheelBalancingFitmentCharges: "0.00", promishDeliveryDate: "04/09/2026", remarks: "",
-      fitmentDate: "03/09/2026", fulfilmentType: "Seller Fulfilled", actualFitmentDeliveryDate: "03/09/2026",
-      cmRemark: "", deliverBy: "04/09/2026", dateOfOrderAndTime: "01/09/2026 16:05", dateOrder: "01/09/2026",
-      orderValue: "1899.00", accountsRemarks: ""
+      shipCity: "Hyderabad", shipState: "Telangana", shipPostalCode: "500034",
+      accountsRemarks: ""
     });
     clearExamplesBtn.hidden = false;
     refreshStats();
