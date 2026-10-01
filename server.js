@@ -67,7 +67,12 @@ function isRateLimited(ip) {
 // "All orders" tab, by order ID. See orderStatusFormula() below.
 // ------------------------------------------------------------------
 const COLUMNS = [
+  // Column A and the Invoices tab's unique key: one row per invoice. An
+  // order with several invoices (one per shipment/item) gets one row each.
+  { key: "invoiceNumber",        label: "Invoice Number",               team: "Accounts", derivable: true },
   { key: "orderStatus",          label: "Order Status",                 team: "OPS",      derivable: false, formula: true },
+  // Live lookup from "All orders", same as Order Status.
+  { key: "actualShipoutDate",    label: "Actual Shipout Date",          team: "OPS",      derivable: false, formula: true },
   { key: "supplierName",         label: "Supplier Name",                team: "Sales",    derivable: true },
   { key: "taxableValue",         label: "Taxable value",                team: "Accounts", derivable: true },
   { key: "invoiceValue",         label: "Invoice value",                team: "Accounts", derivable: true },
@@ -165,7 +170,20 @@ const ORDERS_PASSTHROUGH_KEYS = ORDERS_COLUMNS
   .map((c) => c.key)
   .filter((k) => !["orderId", "orderStatus", "orderValue", "units", "shipmentCreationDate", "actualShipoutDate"].includes(k));
 
+// Unique key of an "All orders" row (an array of cell values in
+// ORDERS_COLUMNS order): its Shipment ID, or "order:<id>" for the rare
+// line with no Shipment ID.
+const SHIPMENT_ID_COL = ORDERS_COLUMNS.findIndex((c) => c.key === "shipmentId");
+const ORDER_ID_COL = ORDERS_COLUMNS.findIndex((c) => c.key === "orderId");
+function orderRowKey(row) {
+  const ship = String((row && row[SHIPMENT_ID_COL]) == null ? "" : row[SHIPMENT_ID_COL]).trim();
+  if (ship) return ship;
+  const oid = String((row && row[ORDER_ID_COL]) == null ? "" : row[ORDER_ID_COL]).trim();
+  return oid ? "order:" + oid : "";
+}
+
 const FIELD_NOTES = [
+  'invoiceNumber: the invoice number exactly as printed (e.g. "JJGZ-179") — NOT the order ID.',
   "supplierName: the seller/supplier name as printed on the invoice (TyresNmore's own selling entity, or the upstream brand if shown separately).",
   "taxableValue: the taxable value (pre-tax amount) as printed on the invoice.",
   "invoiceValue: the total invoice value (including tax) as printed.",
@@ -213,6 +231,7 @@ const headerCheckedAt = {};      // tab name -> last time its header row was ver
 const formatsApplied = {};       // tab name -> true once column number/date formats are set
 const numbersCleaned = {};       // tab name -> true once old text-formatted numbers were converted
 const tabSheetIds = {};          // tab name -> numeric sheetId (needed for row insert/delete)
+const dedupedTabs = {};          // tab name -> true once duplicate rows were removed this process
 const HEADER_RECHECK_MS = 60 * 1000;
 
 async function initGoogle() {
@@ -273,9 +292,31 @@ function ordersTabName() { return process.env.GOOGLE_ORDERS_TAB || "All orders";
 // cost that hand-editing an order-id cell afterwards won't move the
 // lookup with it (that's already discouraged: order-id is a locked,
 // auto-filled field unless someone explicitly unlocks it).
+function lookupId(orderId) { return '"' + String(orderId || "").replace(/"/g, '""') + '"'; }
+function ordersRange(key) {
+  const L = colLetterFor(ORDERS_COLUMNS.findIndex((c) => c.key === key) + 1);
+  return quoteTab(ordersTabName()) + "!" + L + ":" + L;
+}
+// All orders now has one row per SHIPMENT, so an order can appear on
+// several rows (e.g. a cancelled shipment and the one that actually went
+// out). Status prefers the first non-cancelled shipment's status, falling
+// back to "Cancelled" only if every shipment was cancelled.
 function orderStatusFormula(orderId) {
-  const safeId = String(orderId || "").replace(/"/g, '""');
-  return '=IFERROR(VLOOKUP("' + safeId + '", \'' + ordersTabName() + "'!A:B, 2, FALSE), \"\")";
+  const id = lookupId(orderId), A = ordersRange("orderId"), B = ordersRange("orderStatus");
+  return "=IFERROR(INDEX(FILTER(" + B + ", " + A + "=" + id + ", " + B + '<>"Cancelled"), 1), IFERROR(INDEX(FILTER(' + B + ", " + A + "=" + id + '), 1), ""))';
+}
+// Latest Actual Shipout Date across the order's shipments; blank until
+// one has shipped (MAXIFS returns 0 when nothing matches — 1/(1/x) turns
+// that 0 into an error, which IFERROR blanks).
+function shipoutDateFormula(orderId) {
+  const id = lookupId(orderId), A = ordersRange("orderId"), H = ordersRange("actualShipoutDate");
+  return "=IFERROR(1/(1/MAXIFS(" + H + ", " + A + ", " + id + ')), "")';
+}
+function invoiceFormulaFor(key, values) {
+  const orderId = values && values.orderId;
+  if (key === "orderStatus") return orderStatusFormula(orderId);
+  if (key === "actualShipoutDate") return shipoutDateFormula(orderId);
+  return "";
 }
 
 // ------------------------------------------------------------------
@@ -321,7 +362,12 @@ async function getTabSheetId(tab) {
 
 function quoteTab(tab) { return "'" + String(tab).replace(/'/g, "''") + "'"; }
 
-async function ensureHeaderRow(tab, header) {
+// opts.legacyFirsts: first-cell labels of older header layouts that
+// should be recognised as "a header row" rather than data.
+// opts.migrate(gid, legacyFirstCell): extra structural requests to bring
+// an older layout's columns in line with the current one.
+async function ensureHeaderRow(tab, header, opts) {
+  opts = opts || {};
   const last = headerCheckedAt[tab];
   if (last && Date.now() - last < HEADER_RECHECK_MS) return;
   const sheetId = process.env.GOOGLE_SHEET_ID;
@@ -334,16 +380,23 @@ async function ensureHeaderRow(tab, header) {
   const row1 = (rows[0] || []).map((v) => String(v || "").trim());
   const row2 = (rows[1] || []).map((v) => String(v || "").trim());
   const first = header[0];
+  const legacy = opts.legacyFirsts || [];
+  const isHeaderCell = (v) => v === first || legacy.includes(v);
 
   const structural = [];
-  if (row1[0] === first) {
-    // already correct
-  } else if (row2[0] === first && row1.some((v) => v)) {
+  let headerFirstCell = null;
+  if (isHeaderCell(row1[0])) {
+    headerFirstCell = row1[0];
+  } else if (isHeaderCell(row2[0]) && row1.some((v) => v)) {
     // legacy two-row header (team row on top) — delete the team row
     structural.push({ deleteDimension: { range: { sheetId: await getTabSheetId(tab), dimension: "ROWS", startIndex: 0, endIndex: 1 } } });
+    headerFirstCell = row2[0];
   } else if (row1.some((v) => v)) {
     // row 1 is data — make room for the header above it
     structural.push({ insertDimension: { range: { sheetId: await getTabSheetId(tab), dimension: "ROWS", startIndex: 0, endIndex: 1 }, inheritFromBefore: false } });
+  }
+  if (headerFirstCell && headerFirstCell !== first && opts.migrate) {
+    structural.push.apply(structural, await opts.migrate(await getTabSheetId(tab), headerFirstCell));
   }
   if (structural.length) {
     await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: structural } });
@@ -355,6 +408,41 @@ async function ensureHeaderRow(tab, header) {
     requestBody: { values: [header] }
   });
   headerCheckedAt[tab] = Date.now();
+}
+
+// Removes duplicate rows from a tab, once per server process: rows sharing
+// the same key (keyFn over the row's cells) collapse to the one with the
+// most filled-in cells (ties -> the lowest row, i.e. the most recent
+// append). Rows with a blank key are left alone.
+async function dedupeTab(tab, lastColIndex, keyFn) {
+  if (dedupedTabs[tab]) return 0;
+  const resp = await sheetsClient.spreadsheets.values.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: quoteTab(tab) + "!A2:" + colLetterFor(lastColIndex)
+  });
+  const rows = resp.data.values || [];
+  const best = new Map(); // key -> { idx, score }
+  const toDelete = [];
+  rows.forEach((row, i) => {
+    const key = keyFn(row);
+    if (!key) return;
+    const score = row.filter((v) => String(v == null ? "" : v).trim() !== "").length;
+    const cur = best.get(key);
+    if (!cur) { best.set(key, { idx: i, score }); return; }
+    if (score >= cur.score) { toDelete.push(cur.idx); best.set(key, { idx: i, score }); }
+    else toDelete.push(i);
+  });
+  if (toDelete.length) {
+    const gid = await getTabSheetId(tab);
+    const requests = toDelete.sort((x, y) => y - x).map((i) => ({
+      // +1 because `rows` starts at sheet row 2 (0-based index 1)
+      deleteDimension: { range: { sheetId: gid, dimension: "ROWS", startIndex: i + 1, endIndex: i + 2 } }
+    }));
+    await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: process.env.GOOGLE_SHEET_ID, requestBody: { requests } });
+    console.log("dedupeTab(" + tab + "): removed " + toDelete.length + " duplicate rows");
+  }
+  dedupedTabs[tab] = true;
+  return toDelete.length;
 }
 
 // Applies number/date display formats to whole columns (row 2 down), once
@@ -424,12 +512,12 @@ function normaliseInvoiceValue(key, v) {
   return String(v == null ? "" : v);
 }
 
-// Invoices-tab column position (1-based, counting the Row Key column A).
-function invoiceColIndex(key) { return COLUMNS.findIndex((c) => c.key === key) + 2; }
+// Invoices-tab column position (1-based). Invoice Number is column A.
+function invoiceColIndex(key) { return COLUMNS.findIndex((c) => c.key === key) + 1; }
 function ordersColIndex(key) { return ORDERS_COLUMNS.findIndex((c) => c.key === key) + 1; }
 
 function invoicesTabName() { return process.env.GOOGLE_SHEET_TAB || "Invoices"; }
-function invoicesHeader() { return ["Row Key"].concat(COLUMNS.map((c) => c.label)).concat(["Invoice File"]); }
+function invoicesHeader() { return COLUMNS.map((c) => c.label).concat(["Invoice File"]); }
 
 // One-time (per server process) pass over rows synced before this fix:
 // converts text amounts like "₹3,300.00" into real numbers and text dates
@@ -467,16 +555,32 @@ async function cleanExistingInvoiceValues() {
 
 async function ensureInvoicesTabReady() {
   const tab = invoicesTabName();
-  await ensureHeaderRow(tab, invoicesHeader());
+  await ensureHeaderRow(tab, invoicesHeader(), {
+    legacyFirsts: ["Row Key"],
+    // Old layout: A=Row Key (the order ID), B=Order Status, C=Supplier Name…
+    // New layout: A=Invoice Number, B=Order Status, C=Actual Shipout Date,
+    // D=Supplier Name… — inserting one column at C shifts every existing
+    // row's data into the right place. Column A of those old rows still
+    // holds an order ID; it's replaced by the real invoice number the next
+    // time that invoice is uploaded (see claimLegacyRow).
+    migrate: async (gid) => [{
+      insertDimension: { range: { sheetId: gid, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, inheritFromBefore: false }
+    }]
+  });
+  try { await dedupeTab(tab, invoicesHeader().length, (row) => String(row[0] == null ? "" : row[0]).trim()); }
+  catch (e) { console.warn("dedupe Invoices failed (non-fatal):", e.message); }
   await applyColumnFormats(tab,
     INVOICE_MONEY_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "NUMBER", pattern: "#,##0.00" }))
-      .concat(INVOICE_DATE_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "DATE", pattern: "dd-mmm-yyyy" }))));
+      .concat(INVOICE_DATE_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "DATE", pattern: "dd-mmm-yyyy" })))
+      .concat([{ col: invoiceColIndex("actualShipoutDate") - 1, type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" }]));
   try { await cleanExistingInvoiceValues(); } catch (e) { console.warn("cleanExistingInvoiceValues failed (non-fatal):", e.message); }
 }
 
 async function ensureOrdersTabReady() {
   const tab = ordersTabName();
   await ensureHeaderRow(tab, ORDERS_COLUMNS.map((c) => c.label));
+  try { await dedupeTab(tab, ORDERS_COLUMNS.length, orderRowKey); }
+  catch (e) { console.warn("dedupe All orders failed (non-fatal):", e.message); }
   await applyColumnFormats(tab, [
     { col: ordersColIndex("orderValue") - 1,           type: "NUMBER",    pattern: "#,##0.00" },
     { col: ordersColIndex("shipmentCreationDate") - 1, type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" },
@@ -497,30 +601,49 @@ function orderCreationFormula(orderId) {
   return '=IFERROR(INDEX(' + inv + "!" + dateCol + ":" + dateCol + ', MATCH("' + safeId + '", ' + inv + "!" + idCol + ":" + idCol + ', 0)), "")';
 }
 
-async function findRowByKey(rowKey) {
-  const resp = await sheetsClient.spreadsheets.values.get({
+// Returns the sheet row number for an invoice number, or — for rows
+// written before invoice numbers became the key — a legacy row whose
+// column A still holds this invoice's ORDER ID (old rows were keyed by
+// order ID). Claiming that legacy row means re-uploading an old invoice
+// converts its row in place instead of adding a second one.
+async function findInvoiceRow(invoiceNumber, orderId) {
+  const idCol = colLetterFor(invoiceColIndex("orderId"));
+  const resp = await sheetsClient.spreadsheets.values.batchGet({
     spreadsheetId: process.env.GOOGLE_SHEET_ID,
-    range: quoteTab(invoicesTabName()) + "!A:A"
+    ranges: [quoteTab(invoicesTabName()) + "!A:A", quoteTab(invoicesTabName()) + "!" + idCol + ":" + idCol]
   });
-  const col = resp.data.values || [];
-  for (let i = 0; i < col.length; i++) {
-    if (col[i][0] === rowKey) return i + 1; // 1-indexed row number
+  const colA = (resp.data.valueRanges[0] && resp.data.valueRanges[0].values) || [];
+  const colId = (resp.data.valueRanges[1] && resp.data.valueRanges[1].values) || [];
+  const cell = (col, i) => String((col[i] && col[i][0]) == null ? "" : col[i][0]).trim();
+  for (let i = 1; i < colA.length; i++) {
+    if (cell(colA, i) === invoiceNumber) return i + 1;
+  }
+  const oid = String(orderId || "").trim();
+  if (oid && oid !== invoiceNumber) {
+    for (let i = 1; i < colA.length; i++) {
+      // legacy marker: column A equals the row's own order-id cell
+      if (cell(colA, i) === oid && cell(colId, i) === oid) return i + 1;
+    }
   }
   return null;
 }
 
-async function syncRowToSheet(rowKey, values, fileLink) {
+// Invoices tab is keyed by INVOICE NUMBER (column A): one row per invoice.
+async function syncRowToSheet(invoiceNumber, values, fileLink) {
   const tab = invoicesTabName();
+  invoiceNumber = String(invoiceNumber || "").trim();
+  if (!invoiceNumber) throw Object.assign(new Error("missing_invoice_number"), { code: "missing_invoice_number" });
   return withTabLock(tab, async () => {
     const sheetId = process.env.GOOGLE_SHEET_ID;
     await ensureInvoicesTabReady();
-    const rowValues = [rowKey].concat(COLUMNS.map((c) => {
-      // Order Status is never taken from the client — it's always the live
-      // lookup formula, regardless of whatever (if anything) was sent for it.
-      if (c.formula) return orderStatusFormula(values && values.orderId);
+    const rowValues = COLUMNS.map((c) => {
+      if (c.key === "invoiceNumber") return invoiceNumber;
+      // Lookup columns are never taken from the client — always the live
+      // formula into "All orders".
+      if (c.formula) return invoiceFormulaFor(c.key, values);
       return normaliseInvoiceValue(c.key, values && values[c.key]);
-    })).concat([fileLink || ""]);
-    const existingRow = await findRowByKey(rowKey);
+    }).concat([fileLink || ""]);
+    const existingRow = await findInvoiceRow(invoiceNumber, values && values.orderId);
     if (existingRow) {
       await sheetsClient.spreadsheets.values.update({
         spreadsheetId: sheetId,
@@ -551,12 +674,18 @@ async function syncOrdersToSheet(orders) {
     const sheetId = process.env.GOOGLE_SHEET_ID;
     await ensureOrdersTabReady();
 
-    const resp = await sheetsClient.spreadsheets.values.get({ spreadsheetId: sheetId, range: quoteTab(tab) + "!A:A" });
-    const col = resp.data.values || [];
-    const existingRowByOrderId = new Map();
-    for (let i = 1; i < col.length; i++) { // row 1 is the header
-      const id = col[i][0];
-      if (id) existingRowByOrderId.set(id, i + 1);
+    // Keyed by Shipment ID (one row per shipment). Reads the whole tab
+    // width so orderRowKey can fall back to the order ID for a row with
+    // no shipment ID.
+    const resp = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: quoteTab(tab) + "!A:" + colLetterFor(ORDERS_COLUMNS.length)
+    });
+    const rows = resp.data.values || [];
+    const existingRowByKey = new Map();
+    for (let i = 1; i < rows.length; i++) { // row 1 is the header
+      const k = orderRowKey(rows[i]);
+      if (k) existingRowByKey.set(k, i + 1);
     }
 
     const updates = [];
@@ -568,7 +697,7 @@ async function syncOrdersToSheet(orders) {
         if (c.key === "orderValue" || c.key === "units") return toPlainNumber(order[c.key]);
         return String((order && order[c.key]) || "");
       });
-      const existingRow = existingRowByOrderId.get(order.orderId);
+      const existingRow = existingRowByKey.get(orderRowKey(rowValues));
       if (existingRow) {
         updates.push({ range: quoteTab(tab) + "!A" + existingRow, values: [rowValues] });
         updated += 1;
@@ -624,17 +753,17 @@ async function uploadPdfToDrive(buffer, filename) {
 // download report). The same Amazon order can appear on several lines —
 // e.g. a cancelled pick attempt followed by the one that actually
 // shipped, or one line per unit/shipment within a multi-item order — so
-// this groups by Customer Order ID into a single row per order, which
-// then gets upserted straight into the "All orders" tab (see
-// syncOrdersToSheet), the master record for every order whether or not
-// it has a TnM invoice yet:
-//   - orderStatus: the furthest-along status seen for that order (Packed
-//     beats Manifested beats Confirmed; Cancelled only wins if every line
-//     for that order was cancelled).
-//   - orderValue / units: summed across the non-cancelled lines only, so
-//     a cancelled-then-reshipped order isn't double-counted.
+// this groups by Shipment ID into a single row per SHIPMENT (the tab's
+// unique key since 2026-10-01; an order with several shipments gets one
+// row each), which then gets upserted straight into the "All orders" tab
+// (see syncOrdersToSheet), the master record for every order whether or
+// not it has a TnM invoice yet. Within a shipment's lines:
+//   - orderStatus: the furthest-along status seen (Packed beats
+//     Manifested beats Confirmed; Cancelled only wins if every line was
+//     cancelled).
+//   - orderValue / units: summed across the non-cancelled lines only.
 //   - shipmentCreationDate / actualShipoutDate: the earliest / latest of
-//     that column across the order's lines (falling back to the first
+//     that column across the shipment's lines (falling back to the first
 //     non-empty raw value if none of them parse as a date).
 // A small dependency-free CSV parser is used here (RFC4180-ish: handles
 // quoted fields with embedded commas/quotes) rather than adding a new npm
@@ -733,7 +862,9 @@ function importOrdersFromCsv(csvText) {
     if (!r || r.every((c) => c.trim() === "")) continue;
     const orderId = (r[idx["Customer Order ID"]] || "").trim();
     if (!orderId) continue;
+    const shipmentId = idx["Shipment ID"] !== undefined ? (r[idx["Shipment ID"]] || "").trim() : "";
     const line = {
+      orderId,
       status: (r[idx["Status"]] || "").trim(),
       orderValue: toNumber(r[idx["Order Value"]]),
       units: toNumber(r[idx["Units"]]),
@@ -749,14 +880,20 @@ function importOrdersFromCsv(csvText) {
       const label = columnByKey[key].label;
       line[key] = idx[label] !== undefined ? (r[idx[label]] || "").trim() : "";
     });
-    if (!groups.has(orderId)) groups.set(orderId, []);
-    groups.get(orderId).push(line);
+    // One row per SHIPMENT (the All orders tab's unique key); a line with
+    // no Shipment ID falls back to grouping by order ID.
+    const groupKey = shipmentId || ("order:" + orderId);
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(line);
   }
 
   const orders = [];
   let ordersValueTotal = 0;
   let cancelledOrders = 0;
-  groups.forEach((lines, orderId) => {
+  const distinctOrders = new Set();
+  groups.forEach((lines) => {
+    const orderId = lines[0].orderId;
+    distinctOrders.add(orderId);
     const active = lines.filter((l) => l.status !== "Cancelled");
     const useLines = active.length ? active : lines;
     let bestStatus = lines[0].status;
@@ -769,7 +906,7 @@ function importOrdersFromCsv(csvText) {
     const units = useLines.reduce((sum, l) => sum + l.units, 0);
     const first = useLines[0];
     if (!active.length) cancelledOrders += 1;
-    ordersValueTotal += orderValue;
+    else ordersValueTotal += orderValue; // cancelled shipments don't count toward GMV
     const order = {
       orderId,
       orderStatus: bestStatus,
@@ -788,7 +925,9 @@ function importOrdersFromCsv(csvText) {
 
   return {
     orders,
-    summary: { totalOrders: orders.length, ordersValueTotal: ordersValueTotal.toFixed(2), cancelledOrders }
+    // `orders` holds one entry per shipment; cancelledOrders counts fully
+    // cancelled shipments.
+    summary: { totalOrders: distinctOrders.size, totalShipments: orders.length, ordersValueTotal: ordersValueTotal.toFixed(2), cancelledOrders }
   };
 }
 
@@ -852,13 +991,14 @@ app.post("/api/sync-row", async (req, res) => {
   if (isRateLimited("sync:" + req.ip)) return res.status(429).json({ error: "rate_limited" });
   if (!sheetsReady()) return res.status(500).json({ error: "sheets_not_configured" });
 
-  const rowKey = (req.body && req.body.rowKey) || "";
   const values = (req.body && req.body.values) || {};
   const fileLink = (req.body && req.body.fileLink) || "";
-  if (!rowKey) return res.status(400).json({ error: "missing_row_key" });
+  // The Invoices tab's unique key is the invoice number itself.
+  const invoiceNumber = String(values.invoiceNumber || "").trim();
+  if (!invoiceNumber) return res.status(400).json({ error: "missing_invoice_number" });
 
   try {
-    await syncRowToSheet(rowKey, values, fileLink);
+    await syncRowToSheet(invoiceNumber, values, fileLink);
     res.json({ ok: true });
   } catch (e) {
     console.error("sheet sync failed:", e && e.message);
