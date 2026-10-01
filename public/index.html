@@ -233,7 +233,9 @@
   // here and never sent as a value worth acting on (the server ignores
   // whatever the client sends for it anyway).
   var COLUMNS = [
+    { key:"invoiceNumber",       label:"Invoice Number",               team:"Accounts", cls:"mono", w:14 },
     { key:"orderStatus",         label:"Order Status",                 team:"OPS",      cls:"",     w:14, formula:true },
+    { key:"actualShipoutDate",   label:"Actual Shipout Date",          team:"OPS",      cls:"",     w:16, formula:true },
     { key:"supplierName",        label:"Supplier Name",                team:"Sales",    cls:"",     w:20 },
     { key:"taxableValue",        label:"Taxable value",                team:"Accounts", cls:"num",  w:12 },
     { key:"invoiceValue",        label:"Invoice value",                team:"Accounts", cls:"num",  w:12 },
@@ -383,7 +385,8 @@
       pending: ["syncline", "Saving to Sheet…"],
       ok: ["syncline ok", "Synced to Sheet ✓"],
       err: ["syncline err", "Sheet sync failed — will retry"],
-      off: ["syncline", "Sheet sync not set up"]
+      off: ["syncline", "Sheet sync not set up"],
+      nokey: ["syncline err", "Add the invoice number to save this row"]
     };
     var m = map[r.syncState] || map.idle;
     el.syncEl.className = m[0];
@@ -406,7 +409,9 @@
       if (data && typeof data[f] === "string" && data[f].trim() !== "") {
         el.inputs[f].value = data[f];
         if (markAuto && r) r.autoFields.add(f);
-        if (f === "orderId") {
+        if (f === "invoiceNumber") {
+          // The Invoices tab is keyed by invoice number (one row per
+          // invoice — an order with several invoices gets several rows).
           var orderIdVal = data[f].trim();
           orderIdIndex.set(orderIdVal, id);
           // Give this row a Sheet key derived from the order ID itself,
@@ -482,6 +487,8 @@
   async function syncNow(id){
     var r = rows.get(id);
     if (!r || r.status === "example") return;
+    var invNo = (rowEls.get(id).inputs.invoiceNumber.value || "").trim();
+    if (!invNo) { r.syncState = "nokey"; setSyncLine(id); refreshStats(); return; }
     r.syncState = "pending";
     setSyncLine(id);
     try {
@@ -553,7 +560,11 @@
         input.placeholder = "(from All orders)";
       } else {
         input.addEventListener("input", function(){
-          if (c.key === "orderId" && input.value.trim()) orderIdIndex.set(input.value.trim(), id);
+          if (c.key === "invoiceNumber" && input.value.trim()) {
+            orderIdIndex.set(input.value.trim(), id);
+            var rr = rows.get(id);
+            if (rr) { rr.rowKey = input.value.trim(); rr.rowKeyResolved = true; }
+          }
           scheduleSync(id);
         });
       }
@@ -743,7 +754,7 @@
   // version string into the hash means a schema change invalidates every
   // old entry at once, with no need to clear anyone's browser storage by
   // hand.
-  var EXTRACT_SCHEMA_VERSION = "2026-09-28-taxfields";
+  var EXTRACT_SCHEMA_VERSION = "2026-10-01-invoicenumber";
   async function sha256Hex(str){
     var enc = new TextEncoder().encode(str);
     var buf = await crypto.subtle.digest("SHA-256", enc);
@@ -849,6 +860,24 @@
   // rejection message on its row. Case-insensitive since text extraction
   // doesn't guarantee original casing survives.
   var ALLOWED_INVOICE_MARKER = /jjgz/i;
+  // The invoice number is the Invoices tab's unique key, so it's read
+  // straight from the PDF text when possible (deterministic, e.g.
+  // "Invoice Number :JJGZ-179") and the AI's answer is only a fallback.
+  function withInvoiceNumber(data, text){
+    data = Object.assign({}, data || {});
+    var t = String(text || "");
+    var fromText = "";
+    var labelled = t.match(/Invoice\s*(?:Number|No\.?|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]*)/i);
+    if (labelled && /jjgz/i.test(labelled[1])) fromText = labelled[1];
+    if (!fromText) {
+      var bare = t.match(/\b([A-Z0-9]*JJGZ[\-\/]?[A-Z0-9\-\/]*\d)\b/i);
+      if (bare) fromText = bare[1];
+    }
+    fromText = fromText.toUpperCase();
+    var fromAi = typeof data.invoiceNumber === "string" ? data.invoiceNumber.replace(/\s+/g, "").toUpperCase() : "";
+    data.invoiceNumber = fromText || fromAi;
+    return data;
+  }
   function isAllowedInvoice(text){
     return ALLOWED_INVOICE_MARKER.test(text || "");
   }
@@ -954,7 +983,8 @@
     refreshStats();
     try {
       var data = await callExtractApi(text);
-      var extractedOrderId = (data && typeof data.orderId === "string" ? data.orderId.trim() : "");
+      data = withInvoiceNumber(data, text);
+      var extractedOrderId = (data && typeof data.invoiceNumber === "string" ? data.invoiceNumber.trim() : "");
       var existingId = extractedOrderId ? orderIdIndex.get(extractedOrderId) : null;
       if (existingId && existingId !== id && rows.has(existingId)) {
         mergeExtractedRowIntoExisting(id, existingId, data);
@@ -1112,11 +1142,11 @@
       // reports what happened.
       var summary = body.summary || {};
       var bits = [
-        "Imported " + (summary.totalOrders || 0) + " order" + (summary.totalOrders === 1 ? "" : "s") + " from " + file.name,
+        "Imported " + (summary.totalShipments || 0) + " shipment" + (summary.totalShipments === 1 ? "" : "s") + " (" + (summary.totalOrders || 0) + " order" + (summary.totalOrders === 1 ? "" : "s") + ") from " + file.name,
         (summary.created || 0) + " new row" + (summary.created === 1 ? "" : "s") + " in All orders",
         (summary.updated || 0) + " existing row" + (summary.updated === 1 ? "" : "s") + " updated"
       ];
-      if (summary.cancelledOrders) bits.push(summary.cancelledOrders + " fully cancelled");
+      if (summary.cancelledOrders) bits.push(summary.cancelledOrders + " cancelled shipment" + (summary.cancelledOrders === 1 ? "" : "s"));
       ordersResult.className = "ordersresult";
       ordersResult.textContent = bits.join(" — ") + ". Total order value: " + formatInr(summary.ordersValueTotal) + ".";
     } catch (e) {
@@ -1185,6 +1215,7 @@
   function seedExamples(){
     insertRow(uid(), {
       fileName: "sample-amazon-invoice.pdf", status: "example",
+      invoiceNumber: "JJGZ-179",
       orderStatus: "Shipped",
       supplierName: "Apollo Tyres Ltd.",
       taxableValue: "13081.36", invoiceValue: "15436.00", igst: "0.00", cgst: "1177.32", sgst: "1177.32",
@@ -1199,6 +1230,7 @@
     });
     insertRow(uid(), {
       fileName: "sample-tnm-billing.pdf", status: "example",
+      invoiceNumber: "JJGZ-180",
       orderStatus: "Packed",
       supplierName: "JK Tyre & Industries",
       taxableValue: "1609.32", invoiceValue: "1899.00", igst: "289.68", cgst: "0.00", sgst: "0.00",
