@@ -147,7 +147,13 @@ const ORDERS_COLUMNS = [
   { key: "giftMsg",               label: "Gift Msg" },
   { key: "giftWrap",              label: "Gift Wrap" },
   { key: "isFastTrack",           label: "Is Fast Track" },
-  { key: "channel",               label: "Channel" }
+  { key: "channel",               label: "Channel" },
+  // Not in the Seller Flex CSV at all — a live formula that pulls the
+  // order date (purchase-date) from the Invoices tab for the same order
+  // ID, so it fills in automatically once that order's invoice is
+  // uploaded and stays blank until then. Added at the END so none of the
+  // existing columns (or formulas built on them) shift position.
+  { key: "orderCreationDate",     label: "Order Creation Date", formula: true }
 ];
 // Every ORDERS_COLUMNS key except orderId/orderStatus/orderValue/units
 // (computed specially) and the two dates (min/max'd separately) is
@@ -155,6 +161,7 @@ const ORDERS_COLUMNS = [
 // wins" rule — built from ORDERS_COLUMNS itself so a future column
 // addition doesn't need a matching change in three different places.
 const ORDERS_PASSTHROUGH_KEYS = ORDERS_COLUMNS
+  .filter((c) => !c.formula)
   .map((c) => c.key)
   .filter((k) => !["orderId", "orderStatus", "orderValue", "units", "shipmentCreationDate", "actualShipoutDate"].includes(k));
 
@@ -202,8 +209,11 @@ function checkAccessCode(req, res) {
 let sheetsClient = null;
 let driveClient = null;
 let googleReady = false;
-let headerChecked = false;
-let ordersHeaderChecked = false;
+const headerCheckedAt = {};      // tab name -> last time its header row was verified
+const formatsApplied = {};       // tab name -> true once column number/date formats are set
+const numbersCleaned = {};       // tab name -> true once old text-formatted numbers were converted
+const tabSheetIds = {};          // tab name -> numeric sheetId (needed for row insert/delete)
+const HEADER_RECHECK_MS = 60 * 1000;
 
 async function initGoogle() {
   const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
@@ -268,53 +278,230 @@ function orderStatusFormula(orderId) {
   return '=IFERROR(VLOOKUP("' + safeId + '", \'' + ordersTabName() + "'!A:B, 2, FALSE), \"\")";
 }
 
-// NOTE on a bug this fixes: the old version checked cell A1 for "does a
-// header already exist?" — but A1 is the blank corner cell above "Row Key"
-// by design, so that check always saw "empty" and re-appended a brand new
-// header pair below all existing rows on every cold start (Render restarts
-// the process often, which resets the in-memory `headerChecked` flag).
-// Writing to a FIXED range (A1:<lastCol>2) with `update` instead of
-// `append` makes this idempotent — calling it again just re-writes the
-// same two rows in the same place, so headers can never be duplicated
-// further down the sheet.
-async function ensureHeaderRows() {
-  if (headerChecked) return;
-  const sheetId = process.env.GOOGLE_SHEET_ID;
-  const tab = process.env.GOOGLE_SHEET_TAB || "Invoices";
-  const row1 = [""].concat(COLUMNS.map((c) => c.team)).concat(["Attachment"]);
-  const row2 = ["Row Key"].concat(COLUMNS.map((c) => c.label)).concat(["Invoice File"]);
-  const lastCol = colLetterFor(row1.length);
-  await sheetsClient.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: tab + "!A1:" + lastCol + "2",
-    valueInputOption: "RAW",
-    requestBody: { values: [row1, row2] }
-  });
-  headerChecked = true;
+// ------------------------------------------------------------------
+// Header rows — one plain header row per tab, self-healing.
+//
+// History: the Invoices tab used to get TWO header rows (a team row —
+// "OPS / Sales / Accounts / MP Team" — above the field labels). That team
+// row is now dropped; both tabs get a single header row in row 1.
+//
+// The old version also remembered "header done" in an in-memory flag for
+// the life of the server process. If someone cleared or deleted rows in a
+// tab while the server was warm, the flag still said "done", so the next
+// import appended data straight into row 1 with no header at all (that's
+// what happened to "All orders"). Now every tab is re-checked at most
+// once a minute and repaired on the spot:
+//   - row 1 already the header          -> rewritten in place (picks up new columns)
+//   - legacy team row + label row        -> team row deleted, labels stay as row 1
+//   - row 1 blank                        -> header written
+//   - row 1 holds DATA (header missing)  -> a row is inserted above it, header written
+// ------------------------------------------------------------------
+const tabLocks = {};
+// Serialises all writes to one tab. Without this, two syncs for the same
+// order arriving together (e.g. the Drive-upload sync and the extraction
+// sync, or two copies of one invoice in a bulk zip) could both see "no
+// row yet" and both append — producing duplicate rows.
+function withTabLock(tab, fn) {
+  const prev = tabLocks[tab] || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  tabLocks[tab] = next.catch(() => {});
+  return next;
 }
 
-// Same idempotent fixed-range approach for the "All orders" tab, which
-// only needs a single plain header row (no team colour-coding — it's a
-// flat mirror of the Seller Flex export, not a form teams fill in).
-async function ensureOrdersHeaderRow() {
-  if (ordersHeaderChecked) return;
+async function getTabSheetId(tab) {
+  if (tabSheetIds[tab] !== undefined) return tabSheetIds[tab];
+  const resp = await sheetsClient.spreadsheets.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    fields: "sheets.properties(sheetId,title)"
+  });
+  (resp.data.sheets || []).forEach((sh) => { tabSheetIds[sh.properties.title] = sh.properties.sheetId; });
+  if (tabSheetIds[tab] === undefined) throw new Error('Tab "' + tab + '" not found in the Google Sheet');
+  return tabSheetIds[tab];
+}
+
+function quoteTab(tab) { return "'" + String(tab).replace(/'/g, "''") + "'"; }
+
+async function ensureHeaderRow(tab, header) {
+  const last = headerCheckedAt[tab];
+  if (last && Date.now() - last < HEADER_RECHECK_MS) return;
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const tab = ordersTabName();
-  const row1 = ORDERS_COLUMNS.map((c) => c.label);
-  const lastCol = colLetterFor(row1.length);
+  const lastCol = colLetterFor(header.length);
+  const resp = await sheetsClient.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: quoteTab(tab) + "!A1:" + lastCol + "2"
+  });
+  const rows = resp.data.values || [];
+  const row1 = (rows[0] || []).map((v) => String(v || "").trim());
+  const row2 = (rows[1] || []).map((v) => String(v || "").trim());
+  const first = header[0];
+
+  const structural = [];
+  if (row1[0] === first) {
+    // already correct
+  } else if (row2[0] === first && row1.some((v) => v)) {
+    // legacy two-row header (team row on top) — delete the team row
+    structural.push({ deleteDimension: { range: { sheetId: await getTabSheetId(tab), dimension: "ROWS", startIndex: 0, endIndex: 1 } } });
+  } else if (row1.some((v) => v)) {
+    // row 1 is data — make room for the header above it
+    structural.push({ insertDimension: { range: { sheetId: await getTabSheetId(tab), dimension: "ROWS", startIndex: 0, endIndex: 1 }, inheritFromBefore: false } });
+  }
+  if (structural.length) {
+    await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: structural } });
+  }
   await sheetsClient.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: tab + "!A1:" + lastCol + "1",
+    range: quoteTab(tab) + "!A1:" + lastCol + "1",
     valueInputOption: "RAW",
-    requestBody: { values: [row1] }
+    requestBody: { values: [header] }
   });
-  ordersHeaderChecked = true;
+  headerCheckedAt[tab] = Date.now();
+}
+
+// Applies number/date display formats to whole columns (row 2 down), once
+// per server process per tab. `formats` is [{ col: 0-based index, pattern, type }].
+async function applyColumnFormats(tab, formats) {
+  if (formatsApplied[tab] || !formats.length) return;
+  const gid = await getTabSheetId(tab);
+  const requests = [{
+    // bold + frozen header row
+    repeatCell: {
+      range: { sheetId: gid, startRowIndex: 0, endRowIndex: 1 },
+      cell: { userEnteredFormat: { textFormat: { bold: true } } },
+      fields: "userEnteredFormat.textFormat.bold"
+    }
+  }, {
+    updateSheetProperties: { properties: { sheetId: gid, gridProperties: { frozenRowCount: 1 } }, fields: "gridProperties.frozenRowCount" }
+  }].concat(formats.map((f) => ({
+    repeatCell: {
+      range: { sheetId: gid, startRowIndex: 1, startColumnIndex: f.col, endColumnIndex: f.col + 1 },
+      cell: { userEnteredFormat: { numberFormat: { type: f.type, pattern: f.pattern } } },
+      fields: "userEnteredFormat.numberFormat"
+    }
+  })));
+  await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: process.env.GOOGLE_SHEET_ID, requestBody: { requests } });
+  formatsApplied[tab] = true;
+}
+
+// ---- value normalisation: numbers as real numbers, dates as real dates ----
+// The AI returns amounts the way the invoice prints them ("₹9,550.00",
+// "Rs. 1,456.78", "9,550.00"). Written as-is they land in the Sheet as
+// TEXT, which SUM/SUMIFS silently skip. Everything numeric is reduced to
+// a plain number before writing.
+const INVOICE_NUMERIC_KEYS = ["taxableValue", "invoiceValue", "igst", "cgst", "sgst", "numberOfItems", "quantityPurchased", "quantityShipped", "quantityToShip"];
+const INVOICE_MONEY_KEYS = ["taxableValue", "invoiceValue", "igst", "cgst", "sgst"];
+const INVOICE_DATE_KEYS = ["purchaseDate"];
+
+function toPlainNumber(v) {
+  if (typeof v === "number") return v;
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return "";
+  const m = s.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : s;
+}
+
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// Invoice dates are Indian day-first ("05.09.2026", "05/09/2026",
+// "05-Sep-2026"). Returns an ISO "2026-09-05" string, which the Sheet
+// stores as a real date regardless of its locale; anything unrecognised
+// is passed through untouched.
+function toIsoDate(v) {
+  if (typeof v === "number") return v;
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return "";
+  let d, mo, y, m;
+  if ((m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = s.match(/^(\d{1,2})[-\/. ](\d{1,2})[-\/. ](\d{2,4})/))) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else if ((m = s.match(/^(\d{1,2})[-\/. ]*([A-Za-z]{3})[A-Za-z]*[-\/., ]*(\d{2,4})/))) { d = +m[1]; mo = MONTHS[m[2].toLowerCase()]; y = +m[3]; }
+  else return s;
+  if (y < 100) y += 2000;
+  if (!mo || mo > 12 || !d || d > 31) return s;
+  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+
+function normaliseInvoiceValue(key, v) {
+  if (INVOICE_NUMERIC_KEYS.includes(key)) return toPlainNumber(v);
+  if (INVOICE_DATE_KEYS.includes(key)) return toIsoDate(v);
+  return String(v == null ? "" : v);
+}
+
+// Invoices-tab column position (1-based, counting the Row Key column A).
+function invoiceColIndex(key) { return COLUMNS.findIndex((c) => c.key === key) + 2; }
+function ordersColIndex(key) { return ORDERS_COLUMNS.findIndex((c) => c.key === key) + 1; }
+
+function invoicesTabName() { return process.env.GOOGLE_SHEET_TAB || "Invoices"; }
+function invoicesHeader() { return ["Row Key"].concat(COLUMNS.map((c) => c.label)).concat(["Invoice File"]); }
+
+// One-time (per server process) pass over rows synced before this fix:
+// converts text amounts like "₹3,300.00" into real numbers and text dates
+// like "05.09.2026" into real dates, so existing data also adds up.
+async function cleanExistingInvoiceValues() {
+  const tab = invoicesTabName();
+  if (numbersCleaned[tab]) return;
+  const keys = INVOICE_NUMERIC_KEYS.concat(INVOICE_DATE_KEYS);
+  const ranges = keys.map((k) => { const L = colLetterFor(invoiceColIndex(k)); return quoteTab(tab) + "!" + L + "2:" + L; });
+  const resp = await sheetsClient.spreadsheets.values.batchGet({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    ranges,
+    valueRenderOption: "UNFORMATTED_VALUE"
+  });
+  const data = [];
+  (resp.data.valueRanges || []).forEach((vr, i) => {
+    const key = keys[i];
+    const L = colLetterFor(invoiceColIndex(key));
+    (vr.values || []).forEach((row, r) => {
+      const cur = row[0];
+      if (typeof cur !== "string" || !cur.trim() || cur.trim().startsWith("=")) return;
+      const fixed = normaliseInvoiceValue(key, cur);
+      if (fixed !== cur) data.push({ range: quoteTab(tab) + "!" + L + (r + 2), values: [[fixed]] });
+    });
+  });
+  if (data.length) {
+    await sheetsClient.spreadsheets.values.batchUpdate({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      requestBody: { valueInputOption: "USER_ENTERED", data }
+    });
+    console.log("cleanExistingInvoiceValues: converted " + data.length + " text cells to numbers/dates");
+  }
+  numbersCleaned[tab] = true;
+}
+
+async function ensureInvoicesTabReady() {
+  const tab = invoicesTabName();
+  await ensureHeaderRow(tab, invoicesHeader());
+  await applyColumnFormats(tab,
+    INVOICE_MONEY_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "NUMBER", pattern: "#,##0.00" }))
+      .concat(INVOICE_DATE_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "DATE", pattern: "dd-mmm-yyyy" }))));
+  try { await cleanExistingInvoiceValues(); } catch (e) { console.warn("cleanExistingInvoiceValues failed (non-fatal):", e.message); }
+}
+
+async function ensureOrdersTabReady() {
+  const tab = ordersTabName();
+  await ensureHeaderRow(tab, ORDERS_COLUMNS.map((c) => c.label));
+  await applyColumnFormats(tab, [
+    { col: ordersColIndex("orderValue") - 1,           type: "NUMBER",    pattern: "#,##0.00" },
+    { col: ordersColIndex("shipmentCreationDate") - 1, type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" },
+    { col: ordersColIndex("actualShipoutDate") - 1,    type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" },
+    { col: ordersColIndex("exsd") - 1,                 type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" },
+    { col: ordersColIndex("orderCreationDate") - 1,    type: "DATE",      pattern: "dd-mmm-yyyy" }
+  ]);
+}
+
+// Live lookup for the "All orders" tab's Order Creation Date: the
+// purchase-date of the matching order in the Invoices tab, blank until
+// that order's invoice has been uploaded.
+function orderCreationFormula(orderId) {
+  const safeId = String(orderId || "").replace(/"/g, '""');
+  const inv = quoteTab(invoicesTabName());
+  const dateCol = colLetterFor(invoiceColIndex("purchaseDate"));
+  const idCol = colLetterFor(invoiceColIndex("orderId"));
+  return '=IFERROR(INDEX(' + inv + "!" + dateCol + ":" + dateCol + ', MATCH("' + safeId + '", ' + inv + "!" + idCol + ":" + idCol + ', 0)), "")';
 }
 
 async function findRowByKey(rowKey) {
-  const sheetId = process.env.GOOGLE_SHEET_ID;
-  const tab = process.env.GOOGLE_SHEET_TAB || "Invoices";
-  const resp = await sheetsClient.spreadsheets.values.get({ spreadsheetId: sheetId, range: tab + "!A:A" });
+  const resp = await sheetsClient.spreadsheets.values.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: quoteTab(invoicesTabName()) + "!A:A"
+  });
   const col = resp.data.values || [];
   for (let i = 0; i < col.length; i++) {
     if (col[i][0] === rowKey) return i + 1; // 1-indexed row number
@@ -323,32 +510,34 @@ async function findRowByKey(rowKey) {
 }
 
 async function syncRowToSheet(rowKey, values, fileLink) {
-  const sheetId = process.env.GOOGLE_SHEET_ID;
-  const tab = process.env.GOOGLE_SHEET_TAB || "Invoices";
-  await ensureHeaderRows();
-  const rowValues = [rowKey].concat(COLUMNS.map((c) => {
-    // Order Status is never taken from the client — it's always the live
-    // lookup formula, regardless of whatever (if anything) was sent for it.
-    if (c.formula) return orderStatusFormula(values && values.orderId);
-    return String((values && values[c.key]) || "");
-  })).concat([fileLink || ""]);
-  const existingRow = await findRowByKey(rowKey);
-  if (existingRow) {
-    await sheetsClient.spreadsheets.values.update({
-      spreadsheetId: sheetId,
-      range: tab + "!A" + existingRow,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [rowValues] }
-    });
-  } else {
-    await sheetsClient.spreadsheets.values.append({
-      spreadsheetId: sheetId,
-      range: tab + "!A:A",
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: { values: [rowValues] }
-    });
-  }
+  const tab = invoicesTabName();
+  return withTabLock(tab, async () => {
+    const sheetId = process.env.GOOGLE_SHEET_ID;
+    await ensureInvoicesTabReady();
+    const rowValues = [rowKey].concat(COLUMNS.map((c) => {
+      // Order Status is never taken from the client — it's always the live
+      // lookup formula, regardless of whatever (if anything) was sent for it.
+      if (c.formula) return orderStatusFormula(values && values.orderId);
+      return normaliseInvoiceValue(c.key, values && values[c.key]);
+    })).concat([fileLink || ""]);
+    const existingRow = await findRowByKey(rowKey);
+    if (existingRow) {
+      await sheetsClient.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: quoteTab(tab) + "!A" + existingRow,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [rowValues] }
+      });
+    } else {
+      await sheetsClient.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: quoteTab(tab) + "!A:A",
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: [rowValues] }
+      });
+    }
+  });
 }
 
 // Upserts a batch of aggregated orders (see importOrdersFromCsv) straight
@@ -357,49 +546,55 @@ async function syncRowToSheet(rowKey, values, fileLink) {
 // import can easily cover dozens of orders at a time — then issues at
 // most one batchUpdate (existing orders) and one append (new orders).
 async function syncOrdersToSheet(orders) {
-  const sheetId = process.env.GOOGLE_SHEET_ID;
   const tab = ordersTabName();
-  await ensureOrdersHeaderRow();
+  return withTabLock(tab, async () => {
+    const sheetId = process.env.GOOGLE_SHEET_ID;
+    await ensureOrdersTabReady();
 
-  const resp = await sheetsClient.spreadsheets.values.get({ spreadsheetId: sheetId, range: tab + "!A:A" });
-  const col = resp.data.values || [];
-  const existingRowByOrderId = new Map();
-  for (let i = 0; i < col.length; i++) {
-    const id = col[i][0];
-    if (id) existingRowByOrderId.set(id, i + 1);
-  }
-
-  const updates = [];
-  const appends = [];
-  let created = 0, updated = 0;
-  orders.forEach((order) => {
-    const rowValues = ORDERS_COLUMNS.map((c) => String((order && order[c.key]) || ""));
-    const existingRow = existingRowByOrderId.get(order.orderId);
-    if (existingRow) {
-      updates.push({ range: tab + "!A" + existingRow, values: [rowValues] });
-      updated += 1;
-    } else {
-      appends.push(rowValues);
-      created += 1;
+    const resp = await sheetsClient.spreadsheets.values.get({ spreadsheetId: sheetId, range: quoteTab(tab) + "!A:A" });
+    const col = resp.data.values || [];
+    const existingRowByOrderId = new Map();
+    for (let i = 1; i < col.length; i++) { // row 1 is the header
+      const id = col[i][0];
+      if (id) existingRowByOrderId.set(id, i + 1);
     }
-  });
 
-  if (updates.length) {
-    await sheetsClient.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: { valueInputOption: "USER_ENTERED", data: updates }
+    const updates = [];
+    const appends = [];
+    let created = 0, updated = 0;
+    orders.forEach((order) => {
+      const rowValues = ORDERS_COLUMNS.map((c) => {
+        if (c.formula) return orderCreationFormula(order.orderId);
+        if (c.key === "orderValue" || c.key === "units") return toPlainNumber(order[c.key]);
+        return String((order && order[c.key]) || "");
+      });
+      const existingRow = existingRowByOrderId.get(order.orderId);
+      if (existingRow) {
+        updates.push({ range: quoteTab(tab) + "!A" + existingRow, values: [rowValues] });
+        updated += 1;
+      } else {
+        appends.push(rowValues);
+        created += 1;
+      }
     });
-  }
-  if (appends.length) {
-    await sheetsClient.spreadsheets.values.append({
-      spreadsheetId: sheetId,
-      range: tab + "!A:A",
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: { values: appends }
-    });
-  }
-  return { created, updated };
+
+    if (updates.length) {
+      await sheetsClient.spreadsheets.values.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: { valueInputOption: "USER_ENTERED", data: updates }
+      });
+    }
+    if (appends.length) {
+      await sheetsClient.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: quoteTab(tab) + "!A:A",
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: appends }
+      });
+    }
+    return { created, updated };
+  });
 }
 
 async function uploadPdfToDrive(buffer, filename) {
