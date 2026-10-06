@@ -67,8 +67,12 @@ function isRateLimited(ip) {
 // "All orders" tab, by order ID. See orderStatusFormula() below.
 // ------------------------------------------------------------------
 const COLUMNS = [
-  // Column A and the Invoices tab's unique key: one row per invoice. An
-  // order with several invoices (one per shipment/item) gets one row each.
+  // Column A: when the invoice was FIRST uploaded (IST). Set by the server
+  // on the row's first save and never overwritten by a re-upload; not an
+  // input in the tool's own table.
+  { key: "uploadedAt",           label: "Uploaded At",                  team: "Accounts", derivable: false, system: true },
+  // The Invoices tab's unique key: one row per invoice. An order with
+  // several invoices (one per shipment/item) gets one row each.
   { key: "invoiceNumber",        label: "Invoice Number",               team: "Accounts", derivable: true },
   { key: "orderStatus",          label: "Order Status",                 team: "OPS",      derivable: false, formula: true },
   // Live lookup from "All orders", same as Order Status.
@@ -556,24 +560,103 @@ async function cleanExistingInvoiceValues() {
 async function ensureInvoicesTabReady() {
   const tab = invoicesTabName();
   await ensureHeaderRow(tab, invoicesHeader(), {
-    legacyFirsts: ["Row Key"],
+    legacyFirsts: ["Invoice Number", "Row Key"],
     // Old layout: A=Row Key (the order ID), B=Order Status, C=Supplier Name…
     // New layout: A=Invoice Number, B=Order Status, C=Actual Shipout Date,
     // D=Supplier Name… — inserting one column at C shifts every existing
     // row's data into the right place. Column A of those old rows still
     // holds an order ID; it's replaced by the real invoice number the next
     // time that invoice is uploaded (see claimLegacyRow).
-    migrate: async (gid) => [{
-      insertDimension: { range: { sheetId: gid, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, inheritFromBefore: false }
-    }]
+    //
+    // 2026-10-05 layout: "Uploaded At" inserted as a new column A in front
+    // of everything (Invoice Number moves to B). Older layouts get the
+    // column inserts they're missing, in order.
+    migrate: async (gid, firstCell) => {
+      const insertCol = (i) => ({ insertDimension: { range: { sheetId: gid, dimension: "COLUMNS", startIndex: i, endIndex: i + 1 }, inheritFromBefore: false } });
+      if (firstCell === "Row Key") return [insertCol(2), insertCol(0)];
+      if (firstCell === "Invoice Number") return [insertCol(0)];
+      return [];
+    }
   });
-  try { await dedupeTab(tab, invoicesHeader().length, (row) => String(row[0] == null ? "" : row[0]).trim()); }
+  const keyIdx = invoiceColIndex("invoiceNumber") - 1;
+  try { await dedupeTab(tab, invoicesHeader().length, (row) => String(row[keyIdx] == null ? "" : row[keyIdx]).trim()); }
   catch (e) { console.warn("dedupe Invoices failed (non-fatal):", e.message); }
   await applyColumnFormats(tab,
     INVOICE_MONEY_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "NUMBER", pattern: "#,##0.00" }))
       .concat(INVOICE_DATE_KEYS.map((k) => ({ col: invoiceColIndex(k) - 1, type: "DATE", pattern: "dd-mmm-yyyy" })))
-      .concat([{ col: invoiceColIndex("actualShipoutDate") - 1, type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" }]));
+      .concat([{ col: invoiceColIndex("actualShipoutDate") - 1, type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" },
+               { col: invoiceColIndex("uploadedAt") - 1,        type: "DATE_TIME", pattern: "dd-mmm-yyyy h:mm AM/PM" }]));
   try { await cleanExistingInvoiceValues(); } catch (e) { console.warn("cleanExistingInvoiceValues failed (non-fatal):", e.message); }
+  // Fill "Uploaded At" for rows saved before that column existed — runs in
+  // the background so it never slows down the sync that triggered it.
+  if (!uploadedAtBackfillStarted) {
+    uploadedAtBackfillStarted = true;
+    backfillUploadedAt().catch((e) => console.warn("backfillUploadedAt failed (non-fatal):", e.message));
+  }
+}
+
+// Current time in IST as "yyyy-mm-dd HH:MM:SS" (Render runs in UTC). Written
+// with USER_ENTERED, the Sheet stores it as a real date-time.
+function istTimestamp(date) {
+  const d = new Date((date ? new Date(date) : new Date()).getTime() + 330 * 60 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) + " " +
+    p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + ":" + p(d.getUTCSeconds());
+}
+
+// One-time (per server process) backfill: rows saved before "Uploaded At"
+// existed have a blank column A. Their invoice PDF was stored in Drive at
+// upload time, so the Drive file's createdTime IS the original upload time.
+// Rows with no Drive link stay blank.
+let uploadedAtBackfillStarted = false;
+async function backfillUploadedAt() {
+  if (!driveReady()) return;
+  const tab = invoicesTabName();
+  const fileCol = colLetterFor(invoicesHeader().length);
+  const resp = await sheetsClient.spreadsheets.values.batchGet({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    ranges: [quoteTab(tab) + "!A2:A", quoteTab(tab) + "!" + fileCol + "2:" + fileCol]
+  });
+  const colA = (resp.data.valueRanges[0] && resp.data.valueRanges[0].values) || [];
+  const colFile = (resp.data.valueRanges[1] && resp.data.valueRanges[1].values) || [];
+  const todo = [];
+  for (let i = 0; i < colFile.length; i++) {
+    const ts = String((colA[i] && colA[i][0]) || "").trim();
+    const link = String((colFile[i] && colFile[i][0]) || "");
+    const m = link.match(/\/d\/([A-Za-z0-9_-]+)/) || link.match(/[?&]id=([A-Za-z0-9_-]+)/);
+    if (!ts && m) todo.push({ fileId: m[1], link });
+  }
+  if (!todo.length) return;
+  const createdByLink = new Map();
+  for (const t of todo.slice(0, 1000)) {
+    try {
+      const f = await driveClient.files.get({ fileId: t.fileId, fields: "createdTime", supportsAllDrives: true });
+      if (f.data.createdTime) createdByLink.set(t.link, istTimestamp(f.data.createdTime));
+    } catch (e) { /* file deleted or inaccessible — leave blank */ }
+  }
+  // Re-read under the tab lock and match rows by their file link, so rows
+  // added or moved while the Drive lookups ran can't get the wrong time.
+  await withTabLock(tab, async () => {
+    const again = await sheetsClient.spreadsheets.values.batchGet({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      ranges: [quoteTab(tab) + "!A2:A", quoteTab(tab) + "!" + fileCol + "2:" + fileCol]
+    });
+    const a2 = (again.data.valueRanges[0] && again.data.valueRanges[0].values) || [];
+    const f2 = (again.data.valueRanges[1] && again.data.valueRanges[1].values) || [];
+    const data = [];
+    for (let i = 0; i < f2.length; i++) {
+      const ts = String((a2[i] && a2[i][0]) || "").trim();
+      const link = String((f2[i] && f2[i][0]) || "");
+      if (!ts && createdByLink.has(link)) data.push({ range: quoteTab(tab) + "!A" + (i + 2), values: [[createdByLink.get(link)]] });
+    }
+    if (data.length) {
+      await sheetsClient.spreadsheets.values.batchUpdate({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        requestBody: { valueInputOption: "USER_ENTERED", data }
+      });
+      console.log("backfillUploadedAt: filled " + data.length + " rows from Drive file creation times");
+    }
+  });
 }
 
 async function ensureOrdersTabReady() {
@@ -603,14 +686,15 @@ function orderCreationFormula(orderId) {
 
 // Returns the sheet row number for an invoice number, or — for rows
 // written before invoice numbers became the key — a legacy row whose
-// column A still holds this invoice's ORDER ID (old rows were keyed by
-// order ID). Claiming that legacy row means re-uploading an old invoice
+// Invoice Number cell still holds this invoice's ORDER ID (old rows were
+// keyed by order ID). Claiming that legacy row means re-uploading an old invoice
 // converts its row in place instead of adding a second one.
 async function findInvoiceRow(invoiceNumber, orderId) {
   const idCol = colLetterFor(invoiceColIndex("orderId"));
+  const keyCol = colLetterFor(invoiceColIndex("invoiceNumber"));
   const resp = await sheetsClient.spreadsheets.values.batchGet({
     spreadsheetId: process.env.GOOGLE_SHEET_ID,
-    ranges: [quoteTab(invoicesTabName()) + "!A:A", quoteTab(invoicesTabName()) + "!" + idCol + ":" + idCol]
+    ranges: [quoteTab(invoicesTabName()) + "!" + keyCol + ":" + keyCol, quoteTab(invoicesTabName()) + "!" + idCol + ":" + idCol]
   });
   const colA = (resp.data.valueRanges[0] && resp.data.valueRanges[0].values) || [];
   const colId = (resp.data.valueRanges[1] && resp.data.valueRanges[1].values) || [];
@@ -621,14 +705,17 @@ async function findInvoiceRow(invoiceNumber, orderId) {
   const oid = String(orderId || "").trim();
   if (oid && oid !== invoiceNumber) {
     for (let i = 1; i < colA.length; i++) {
-      // legacy marker: column A equals the row's own order-id cell
+      // legacy marker: the Invoice Number cell equals the row's own order-id cell
       if (cell(colA, i) === oid && cell(colId, i) === oid) return i + 1;
     }
   }
   return null;
 }
 
-// Invoices tab is keyed by INVOICE NUMBER (column A): one row per invoice.
+// Invoices tab is keyed by INVOICE NUMBER (column B): one row per invoice.
+// Column A ("Uploaded At") is stamped only when the row is first created;
+// later re-uploads of the same invoice update everything from column B on
+// and leave the original timestamp alone.
 async function syncRowToSheet(invoiceNumber, values, fileLink) {
   const tab = invoicesTabName();
   invoiceNumber = String(invoiceNumber || "").trim();
@@ -637,6 +724,7 @@ async function syncRowToSheet(invoiceNumber, values, fileLink) {
     const sheetId = process.env.GOOGLE_SHEET_ID;
     await ensureInvoicesTabReady();
     const rowValues = COLUMNS.map((c) => {
+      if (c.key === "uploadedAt") return istTimestamp();
       if (c.key === "invoiceNumber") return invoiceNumber;
       // Lookup columns are never taken from the client — always the live
       // formula into "All orders".
@@ -645,11 +733,12 @@ async function syncRowToSheet(invoiceNumber, values, fileLink) {
     }).concat([fileLink || ""]);
     const existingRow = await findInvoiceRow(invoiceNumber, values && values.orderId);
     if (existingRow) {
+      // skip column A so the first-upload timestamp is preserved
       await sheetsClient.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: quoteTab(tab) + "!A" + existingRow,
+        range: quoteTab(tab) + "!" + colLetterFor(2) + existingRow,
         valueInputOption: "USER_ENTERED",
-        requestBody: { values: [rowValues] }
+        requestBody: { values: [rowValues.slice(1)] }
       });
     } else {
       await sheetsClient.spreadsheets.values.append({
