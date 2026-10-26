@@ -1,0 +1,1386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InvoiceIQ</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#F1F3F6; --surface:#FFFFFF; --surface-2:#E7EAEF; --surface-3:#DCE0E6; --border:#D6DBE2;
+    --text:#161A20; --text-muted:#5B6472;
+    --accent:#B85E0C; --accent-hover:#9B4E09; --accent-contrast:#FFFFFF; --accent-soft:#F6E4C9;
+    --steel:#35495C; --steel-soft:#E3E8ED; --steel-text:#22303D;
+    --success:#26794F; --success-soft:#DBF0E2;
+    --warning:#93630F; --warning-soft:#FBEAD1;
+    --danger:#B23A26; --danger-soft:#FBE1DB;
+    --sales:#2A5C8A; --sales-soft:#E1EBF5;
+    --accounts:#6A4A9C; --accounts-soft:#EAE3F5;
+    --ops:#1E7A6F; --ops-soft:#DEF0EC;
+    --mp:#9C4A6A; --mp-soft:#F5E1EA;
+    --font-display:'Archivo', ui-sans-serif, system-ui, sans-serif;
+    --font-body:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#13171C; --surface:#1B2027; --surface-2:#232933; --surface-3:#2B323D; --border:#333B46;
+      --text:#ECEEF1; --text-muted:#9BA5B2;
+      --accent:#E38A34; --accent-hover:#F2984A; --accent-contrast:#14181D; --accent-soft:#3A2A15;
+      --steel:#8FA5B8; --steel-soft:#242C35; --steel-text:#CBD8E3;
+      --success:#4FAE7C; --success-soft:#183226;
+      --warning:#D9A441; --warning-soft:#332609;
+      --danger:#E27462; --danger-soft:#3A1D17;
+      --sales:#7CAEDE; --sales-soft:#1C2A38;
+      --accounts:#B79AE0; --accounts-soft:#2A2338;
+      --ops:#6FC9BB; --ops-soft:#182E2A;
+      --mp:#E0A0BC; --mp-soft:#331F28;
+    }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{ background:var(--bg); color:var(--text); font-family:var(--font-body); padding-inline:20px; padding-block:24px 40px; }
+  h1,h2,h3{ font-family:var(--font-display); letter-spacing:-0.01em; margin:0; }
+  button{ font-family:inherit; }
+  input, textarea{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; } }
+  [hidden]{ display:none !important; }
+
+  .wrap{ max-width:1360px; margin-inline:auto; display:flex; flex-direction:column; gap:20px; }
+
+  .masthead{ background:var(--steel); border-radius:14px; padding:22px 26px; display:flex; flex-direction:column; gap:6px; color:#fff; }
+  .masthead .eyebrow{ font-family:var(--font-mono); font-size:12px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; }
+  .masthead h1{ font-size:26px; color:#fff; }
+  .masthead p{ margin:0; font-size:14px; color:rgba(255,255,255,0.78); max-width:74ch; }
+  .masthead .badge{ display:inline-flex; align-self:flex-start; margin-top:2px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.04em; background:rgba(255,255,255,0.14); padding:3px 10px; border-radius:99px; }
+
+  .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  .stat{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+  .stat .n{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:22px; font-weight:600; }
+  .stat .l{ font-size:12px; color:var(--text-muted); }
+
+  .banner{ border:1px solid var(--warning); background:var(--warning-soft); color:var(--warning); border-radius:10px; padding:10px 14px; font-size:13px; display:none; align-items:flex-start; gap:8px; }
+  .banner.show{ display:flex; }
+
+  .dropzone{ border:2px dashed var(--border); border-radius:14px; background:var(--surface); padding:26px 20px; display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent); background:var(--accent-soft); }
+  .dropzone .ic{ width:34px; height:34px; color:var(--accent); }
+  .dropzone strong{ font-size:14.5px; }
+  .dropzone span{ font-size:12.5px; color:var(--text-muted); }
+  .dropzone input{ display:none; }
+
+  .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+  .toolbar .left{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .btn{ border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:8px; padding:8px 13px; font-size:13px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover{ background:var(--surface-2); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-contrast); font-weight:600; }
+  .btn.primary:hover{ background:var(--accent-hover); }
+  .btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+  .table-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .table-scroll{ overflow-x:auto; max-height:72vh; overflow-y:auto; }
+  table{ border-collapse:collapse; font-size:12.5px; }
+  thead th{ position:sticky; background:var(--steel-soft); color:var(--steel-text); text-align:left; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; padding:8px 9px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); white-space:nowrap; }
+  thead tr.fld th{ top:0; z-index:1; }
+  tbody td{ padding:5px 8px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); vertical-align:middle; }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr.example{ opacity:0.62; }
+  tbody tr:hover{ background:var(--surface-2); }
+  td input{ width:100%; min-width:100%; border:1px solid transparent; background:transparent; color:var(--text); font-size:12.5px; padding:5px 6px; border-radius:6px; }
+  td input:hover{ border-color:var(--border); }
+  td input:focus{ border-color:var(--accent); background:var(--surface); outline:none; }
+  td input:disabled{ color:var(--text-muted); cursor:not-allowed; }
+  td.num input, td.mono input{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+  td.file{ max-width:180px; }
+  /* The input + unlock-icon pair inside each field cell used to be laid
+     out with `display:flex` directly on the <td> itself. A <td> with a
+     non-table `display` stops participating in the table's column-width
+     tracking in most browsers, so every one of these cells collapsed onto
+     the same spot instead of keeping its own column — the flex layout
+     lives on an inner wrapper div instead so the <td> stays a normal
+     table cell. */
+  td.fieldcell{ padding:0; }
+  .fieldcell-inner{ display:flex; align-items:center; gap:2px; padding:5px 8px; width:100%; box-sizing:border-box; }
+  .fieldcell-inner input{ width:auto; min-width:0; flex:1 1 auto; }
+  .unlockbtn{ display:none; flex:0 0 auto; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-muted); font-size:11px; width:20px; height:20px; padding:0; border-radius:6px; cursor:pointer; }
+  .unlockbtn.show{ display:inline-flex; }
+  .unlockbtn:hover{ background:var(--surface-2); color:var(--text); }
+
+  .ordersresult{ font-size:12.5px; color:var(--text-muted); background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; }
+  .ordersresult.err{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
+  .filename{ display:flex; align-items:center; gap:6px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .filename svg{ flex:none; width:14px; height:14px; color:var(--text-muted); }
+  a.filelink{ color:var(--accent); text-decoration:none; font-weight:600; }
+  a.filelink:hover{ text-decoration:underline; }
+
+  .chip{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+  .chip.example{ background:var(--surface-2); color:var(--text-muted); }
+  .chip.busy{ background:var(--accent-soft); color:var(--accent); }
+  .chip.ok{ background:var(--success-soft); color:var(--success); }
+  .chip.manual{ background:var(--steel-soft); color:var(--steel-text); }
+  .chip.err{ background:var(--danger-soft); color:var(--danger); }
+  .spin{ width:9px; height:9px; border-radius:50%; border:1.5px solid currentColor; border-top-color:transparent; animation:spin .7s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .syncline{ font-size:10px; color:var(--text-muted); margin-top:3px; white-space:nowrap; }
+  .syncline.ok{ color:var(--success); }
+  .syncline.err{ color:var(--danger); }
+
+  .iconbtn{ border:none; background:transparent; color:var(--text-muted); width:24px; height:24px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .iconbtn:hover{ background:var(--surface-2); color:var(--text); }
+  .iconbtn.danger:hover{ background:var(--danger-soft); color:var(--danger); }
+
+  .detail td{ background:var(--surface-2); padding:0 10px 12px 10px; border-right:none; }
+  .detail pre{ margin:0; max-height:160px; overflow:auto; font-family:var(--font-mono); font-size:11.5px; line-height:1.5; white-space:pre-wrap; color:var(--text-muted); background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; }
+  .detail .cap{ font-size:11px; color:var(--text-muted); margin:8px 0 4px; }
+  .errmsg{ font-size:11px; color:var(--danger); margin-top:2px; }
+  .retry{ font-size:11px; color:var(--accent); background:none; border:none; cursor:pointer; padding:0; font-weight:600; text-decoration:underline; }
+  .srcbtn{ font-size:11px; color:var(--text-muted); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; }
+
+  footer{ text-align:center; font-size:11.5px; color:var(--text-muted); padding-top:4px; }
+  .hint{ font-size:12px; color:var(--text-muted); }
+
+  /* Passcode gate */
+  .gate{ position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; }
+  .gate-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; max-width:360px; width:100%; display:flex; flex-direction:column; gap:12px; }
+  .gate-card h2{ font-size:18px; }
+  .gate-card p{ margin:0; font-size:13px; color:var(--text-muted); }
+  .gate-card input{ border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:14px; background:var(--bg); color:var(--text); }
+  .gate-card .err{ font-size:12.5px; color:var(--danger); min-height:16px; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <h2>InvoiceIQ</h2>
+    <p>Enter the team passcode to continue.</p>
+    <input type="password" id="gateInput" placeholder="Passcode" autocomplete="off">
+    <div class="err" id="gateErr"></div>
+    <button class="btn primary" id="gateBtn" type="button">Continue</button>
+  </div>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <div class="masthead">
+    <div class="eyebrow">TyresNmore &middot; Sales &middot; OPS &middot; Accounts</div>
+    <h1>InvoiceIQ</h1>
+    <p>Drop in a marketplace order invoice PDF, or upload the Seller Flex orders CSV to get every order into the sheet the same day &mdash; before its invoice even exists. Fields each source can answer are filled in automatically; everything else stays blank for the owning team to fill in. Every row saves straight into the shared Google Sheet, with the original PDF attached for anyone who needs to open it.</p>
+    <span class="badge" id="statusBadge">No account needed &middot; syncing to Google Sheet</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="statUploaded">0</div><div class="l">Invoices uploaded</div></div>
+    <div class="stat"><div class="n" id="statAuto">0</div><div class="l">Auto-extracted</div></div>
+    <div class="stat"><div class="n" id="statReview">0</div><div class="l">Needs review</div></div>
+    <div class="stat"><div class="n" id="statSynced">0</div><div class="l">Synced to Sheet</div></div>
+  </div>
+
+  <div class="banner" id="aiBanner"><span id="aiBannerText"></span></div>
+
+  <label class="dropzone" id="dropzone" for="fileInput">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <strong>Drop invoice PDFs here, or click to browse</strong>
+    <span>PDFs, or a .zip of PDFs (e.g. an Amazon bulk invoice download) &middot; each PDF is stored and linked, its text is used to auto-fill fields &middot; Seller Flex invoices only for now (others are rejected before upload &mdash; no cost, nothing saved)</span>
+    <input type="file" id="fileInput" accept="application/pdf,.zip,application/zip" multiple>
+  </label>
+  <div class="ordersresult" id="rejectedResult" hidden></div>
+
+  <label class="dropzone" id="ordersDropzone" for="ordersFileInput">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
+    <strong>Upload the Seller Flex &ldquo;all orders&rdquo; CSV</strong>
+    <span>Updates the "All orders" tab directly, one row per order, matched or created by order ID &mdash; the master record for every order whether or not it has a TnM invoice yet. The Invoices tab's Order Status looks this tab up automatically, so nothing here needs uploading again to catch a status change.</span>
+    <input type="file" id="ordersFileInput" accept=".csv,text/csv">
+  </label>
+  <div class="ordersresult" id="ordersResult" hidden></div>
+
+  <div class="toolbar">
+    <div class="left">
+      <button class="btn" id="addRowBtn" type="button">+ Add row manually</button>
+      <button class="btn" id="clearExamplesBtn" type="button" hidden>Clear example rows</button>
+      <span class="hint" id="fieldCountHint"></span>
+    </div>
+    <button class="btn primary" id="exportBtn" type="button" disabled>Export to Excel (backup copy)</button>
+  </div>
+
+  <div class="table-card">
+    <div class="table-scroll">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Each row saves automatically to the shared Google Sheet as fields change. PDFs are stored so anyone can open the original from the Sheet or from this page. Review auto-filled values before relying on them.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+  }
+
+  // Mirrors the COLUMNS array in server.js — keep the two in sync.
+  // orderStatus is `formula:true`: the Sheet fills that cell with a live
+  // VLOOKUP into the "All orders" tab, so its input is always disabled
+  // here and never sent as a value worth acting on (the server ignores
+  // whatever the client sends for it anyway).
+  var COLUMNS = [
+    { key:"invoiceNumber",       label:"Invoice Number",               team:"Accounts", cls:"mono", w:14 },
+    { key:"orderStatus",         label:"Order Status",                 team:"OPS",      cls:"",     w:14, formula:true },
+    { key:"actualShipoutDate",   label:"Actual Shipout Date",          team:"OPS",      cls:"",     w:16, formula:true },
+    { key:"supplierName",        label:"Supplier Name",                team:"Sales",    cls:"",     w:20 },
+    { key:"taxableValue",        label:"Taxable value",                team:"Accounts", cls:"num",  w:12 },
+    { key:"invoiceValue",        label:"Invoice value",                team:"Accounts", cls:"num",  w:12 },
+    { key:"igst",                label:"IGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"cgst",                label:"CGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"sgst",                label:"SGST",                         team:"Accounts", cls:"num",  w:10 },
+    { key:"orderId",             label:"order-id",                     team:"MP Team",  cls:"mono", w:20 },
+    { key:"orderItemId",         label:"order-item-id",                team:"MP Team",  cls:"mono", w:16 },
+    { key:"purchaseDate",        label:"purchase-date",                team:"MP Team",  cls:"mono", w:12 },
+    { key:"paymentsDate",        label:"payments-date",                team:"Accounts", cls:"mono", w:12 },
+    { key:"buyerName",           label:"buyer-name",                   team:"Sales",    cls:"",     w:20 },
+    { key:"buyerPhoneNumber",    label:"buyer-phone-number",           team:"Sales",    cls:"mono", w:14 },
+    { key:"sku",                 label:"sku",                          team:"Sales",    cls:"mono", w:16 },
+    { key:"numberOfItems",       label:"number-of-items",              team:"Sales",    cls:"num",  w:10 },
+    { key:"productName",         label:"product-name",                 team:"Sales",    cls:"",     w:26 },
+    { key:"quantityPurchased",   label:"quantity-purchased",           team:"Sales",    cls:"num",  w:10 },
+    { key:"quantityShipped",     label:"quantity-shipped",             team:"OPS",      cls:"num",  w:10 },
+    { key:"quantityToShip",      label:"quantity-to-ship",             team:"OPS",      cls:"num",  w:10 },
+    { key:"shipServiceLevel",    label:"ship-service-level",           team:"OPS",      cls:"",     w:14 },
+    { key:"recipientName",       label:"recipient-name",               team:"Sales",    cls:"",     w:20 },
+    { key:"shipAddress1",        label:"ship-address-1",               team:"Sales",    cls:"",     w:26 },
+    { key:"shipAddress2",        label:"ship-address-2",               team:"Sales",    cls:"",     w:22 },
+    { key:"shipAddress3",        label:"ship-address-3",               team:"Sales",    cls:"",     w:22 },
+    { key:"shipCity",            label:"ship-city",                    team:"Sales",    cls:"",     w:14 },
+    { key:"shipState",           label:"ship-state",                   team:"Sales",    cls:"",     w:14 },
+    { key:"shipPostalCode",      label:"ship-postal-code",             team:"Sales",    cls:"mono", w:11 },
+    { key:"accountsRemarks",     label:"Accounts Remarks",             team:"Accounts", cls:"",     w:24 }
+  ];
+  var FIELDS = COLUMNS.map(function(c){ return c.key; });
+  var FORMULA_KEYS = new Set(COLUMNS.filter(function(c){ return c.formula; }).map(function(c){ return c.key; }));
+  var META_COLS = 4;
+
+  var gate = document.getElementById("gate");
+  var gateInput = document.getElementById("gateInput");
+  var gateErr = document.getElementById("gateErr");
+  var gateBtn = document.getElementById("gateBtn");
+  var app = document.getElementById("app");
+
+  var thead = document.getElementById("thead");
+  var tbody = document.getElementById("tbody");
+  var addRowBtn = document.getElementById("addRowBtn");
+  var clearExamplesBtn = document.getElementById("clearExamplesBtn");
+  var exportBtn = document.getElementById("exportBtn");
+  var fileInput = document.getElementById("fileInput");
+  var dropzone = document.getElementById("dropzone");
+  var rejectedResult = document.getElementById("rejectedResult");
+  var ordersFileInput = document.getElementById("ordersFileInput");
+  var ordersDropzone = document.getElementById("ordersDropzone");
+  var ordersResult = document.getElementById("ordersResult");
+  var fieldCountHint = document.getElementById("fieldCountHint");
+  var aiBanner = document.getElementById("aiBanner");
+  var aiBannerText = document.getElementById("aiBannerText");
+  var statusBadge = document.getElementById("statusBadge");
+
+  var statUploaded = document.getElementById("statUploaded");
+  var statAuto = document.getElementById("statAuto");
+  var statReview = document.getElementById("statReview");
+  var statSynced = document.getElementById("statSynced");
+
+  var rows = new Map();
+  var rowEls = new Map();
+  var seq = 0;
+  var uploadedCount = 0;
+  var accessCode = sessionStorage.getItem("tnm_access_code") || "";
+  var config = { requiresAccessCode: false, sheetsConfigured: false, driveConfigured: false };
+  var syncTimers = new Map();
+  // Maps an order ID (however it was first learned — AI extraction, a CSV
+  // import, or a manual edit) to the row id that owns it, so a PDF invoice
+  // and a Seller Flex CSV row for the same order land on ONE line in the
+  // Sheet no matter which one arrives first.
+  var orderIdIndex = new Map();
+  // When a temporary "reading this PDF" row turns out to belong to an order
+  // that already has a row (created earlier from the orders CSV), that row
+  // gets merged into the existing one and removed — this remembers where
+  // it went, so a still-in-flight Drive upload for the removed row's file
+  // lands on the right row instead of silently doing nothing.
+  var redirects = new Map();
+
+  function uid(){ seq += 1; return "r" + seq; }
+  function makeRowKey(){
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "rk-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  }
+  function esc(s){ return String(s == null ? "" : s); }
+  function chWidth(w){ return Math.max(70, Math.min(260, w * 7.2)); }
+  function svgFile(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5" stroke-linejoin="round"/></svg>';
+  }
+
+  function buildHead(){
+    var rowFld = document.createElement("tr");
+    rowFld.className = "fld";
+    rowFld.appendChild(th("", { style:"width:34px" }));
+    rowFld.appendChild(th("Invoice file", {}));
+    COLUMNS.forEach(function(c){ rowFld.appendChild(th(c.label, { style:"min-width:" + chWidth(c.w) + "px" })); });
+    rowFld.appendChild(th("Status", {}));
+    rowFld.appendChild(th("", { style:"width:34px" }));
+    thead.appendChild(rowFld);
+  }
+  function th(text, opts){
+    opts = opts || {};
+    var el = document.createElement("th");
+    el.textContent = text;
+    if (opts.rowspan) el.rowSpan = opts.rowspan;
+    if (opts.colspan) el.colSpan = opts.colspan;
+    if (opts.style) el.setAttribute("style", opts.style);
+    if (opts.cls) el.className = opts.cls;
+    return el;
+  }
+
+  function refreshStats(){
+    var auto = 0, review = 0, synced = 0;
+    rows.forEach(function(r){
+      if (r.status === "example") return;
+      if (r.status === "extracted") auto += 1;
+      if (r.status === "error" || r.status === "manual" || r.status === "extracting" || r.status === "reading") review += 1;
+      if (r.syncState === "ok") synced += 1;
+    });
+    statUploaded.textContent = uploadedCount;
+    statAuto.textContent = auto;
+    statReview.textContent = review;
+    statSynced.textContent = synced;
+    exportBtn.disabled = rows.size === 0;
+  }
+
+  function setChip(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var map = {
+      example: ["chip example", "Example"],
+      reading: ["chip busy", '<span class="spin"></span> Reading PDF'],
+      extracting: ["chip busy", '<span class="spin"></span> Extracting'],
+      extracted: ["chip ok", "Extracted"],
+      manual: ["chip manual", "Manual entry"],
+      error: ["chip err", "Needs attention"]
+    };
+    var m = map[r.status] || map.manual;
+    el.statusChip.className = m[0];
+    el.statusChip.innerHTML = m[1];
+  }
+
+  function setSyncLine(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var map = {
+      idle: ["syncline", ""],
+      pending: ["syncline", "Saving to Sheet…"],
+      ok: ["syncline ok", "Synced to Sheet ✓"],
+      err: ["syncline err", "Sheet sync failed — edit any field or re-upload to try again"],
+      wait: ["syncline err", ""], // text filled in below with a live countdown
+      off: ["syncline", "Sheet sync not set up"],
+      nokey: ["syncline err", "Add the invoice number to save this row"]
+    };
+    var m = map[r.syncState] || map.idle;
+    el.syncEl.className = m[0];
+    el.syncEl.textContent = r.syncState === "wait" ? waitText(r) : m[1];
+  }
+
+  // markAuto: true when `data` came from an automated source (AI extraction
+  // or a Seller Flex CSV import) rather than someone typing — those fields
+  // get locked once this row next syncs successfully (see
+  // lockAutoFieldsAfterSync). A fresh automated pass is always allowed to
+  // refresh a field even if it's currently locked — locking only blocks a
+  // stray keystroke in the tool, not the pipeline that's supposed to keep
+  // the value current (e.g. Order Status needs to keep updating as a
+  // Seller Flex CSV is re-uploaded over the life of an order).
+  function applyFieldsToInputs(id, data, markAuto){
+    var el = rowEls.get(id);
+    var r = rows.get(id);
+    if (!el) return;
+    FIELDS.forEach(function(f){
+      if (data && typeof data[f] === "string" && data[f].trim() !== "") {
+        el.inputs[f].value = data[f];
+        if (markAuto && r) r.autoFields.add(f);
+        if (f === "invoiceNumber") {
+          // The Invoices tab is keyed by invoice number (one row per
+          // invoice — an order with several invoices gets several rows).
+          var orderIdVal = data[f].trim();
+          orderIdIndex.set(orderIdVal, id);
+          // Give this row a Sheet key derived from the order ID itself,
+          // instead of the random one it was created with. That makes the
+          // Sheet sync below idempotent: re-uploading the same invoice (or
+          // re-importing the same order) on a later day resolves to the
+          // SAME key, so it updates that existing Sheet row instead of
+          // appending a duplicate. Safe to do here because this always runs
+          // before the row's first sync is scheduled (see call sites). The
+          // Row Key column is just the bare order ID — no prefix — so it
+          // reads the same as the order-id column next to it.
+          if (r) { r.rowKey = orderIdVal; r.rowKeyResolved = true; }
+        }
+      }
+    });
+  }
+
+  function applyLockState(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    Object.keys(el.inputs).forEach(function(key){
+      if (FORMULA_KEYS.has(key)) return; // always disabled, never lock-managed
+      var locked = r.lockedFields.has(key);
+      el.inputs[key].disabled = locked;
+      var btn = el.unlockBtns[key];
+      if (btn) btn.classList.toggle("show", locked);
+    });
+  }
+
+  function unlockField(id, key){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    r.lockedFields.delete(key);
+    applyLockState(id);
+    if (el.inputs[key]) el.inputs[key].focus();
+  }
+
+  // Called right after a row syncs to the Sheet successfully: any field
+  // that was set automatically (AI extraction or CSV import) and currently
+  // has a value becomes read-only, so a mistaken keystroke can't silently
+  // overwrite good data with no way to catch it. Someone can still click
+  // the small lock icon to deliberately correct a field.
+  function lockAutoFieldsAfterSync(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    var changed = false;
+    r.autoFields.forEach(function(key){
+      var input = el.inputs[key];
+      if (input && input.value.trim() !== "" && !r.lockedFields.has(key)) {
+        r.lockedFields.add(key);
+        changed = true;
+      }
+    });
+    if (changed) applyLockState(id);
+  }
+
+  function currentValues(id){
+    var el = rowEls.get(id);
+    var out = {};
+    FIELDS.forEach(function(f){ out[f] = el.inputs[f].value; });
+    return out;
+  }
+
+  // ---- automatic retry with a visible countdown ----
+  // Google Sheets limits how many reads/writes the app can make per minute,
+  // so a big batch can briefly hit "Google Sheets busy". Instead of failing,
+  // the row waits and retries on its own, showing how long until the next
+  // attempt. Other failures retry a few times too, then stop.
+  var SYNC_BACKOFF_S = [25, 35, 45, 60, 60, 60, 60, 60];
+  var countdownTicker = null;
+  function secondsLeft(at){ return Math.max(0, Math.ceil((at - Date.now()) / 1000)); }
+  function waitText(r){
+    var s = secondsLeft(r.retryAt || 0);
+    var why = r.waitReason === "busy" ? "Google Sheets busy" : "Sheet sync failed";
+    return why + " — retrying in " + s + "s (attempt " + ((r.syncAttempt || 0) + 1) + " of " + (SYNC_BACKOFF_S.length + 1) + ")";
+  }
+  function ensureCountdownTicker(){
+    if (countdownTicker) return;
+    countdownTicker = setInterval(function(){
+      var any = false;
+      rows.forEach(function(r, id){ if (r.syncState === "wait") { any = true; setSyncLine(id); } });
+      if (!any) { clearInterval(countdownTicker); countdownTicker = null; }
+    }, 1000);
+  }
+  function scheduleSyncRetry(id, reason, serverSeconds){
+    var r = rows.get(id);
+    if (!r) return;
+    var attempt = r.syncAttempt || 0;
+    var maxAttempts = reason === "busy" ? SYNC_BACKOFF_S.length : 3;
+    if (attempt >= maxAttempts) { r.syncState = "err"; r.syncAttempt = 0; setSyncLine(id); refreshStats(); return; }
+    var wait = Math.max(SYNC_BACKOFF_S[attempt], serverSeconds || 0);
+    r.syncAttempt = attempt + 1;
+    r.waitReason = reason;
+    r.retryAt = Date.now() + wait * 1000;
+    r.syncState = "wait";
+    var existing = syncTimers.get(id);
+    if (existing) clearTimeout(existing);
+    syncTimers.set(id, setTimeout(function(){ syncNow(id, true); }, wait * 1000));
+    setSyncLine(id);
+    ensureCountdownTicker();
+    refreshStats();
+  }
+
+  function scheduleSync(id){
+    if (!config.sheetsConfigured) { var r = rows.get(id); if (r) { r.syncState = "off"; setSyncLine(id); } return; }
+    var existing = syncTimers.get(id);
+    if (existing) clearTimeout(existing);
+    var r = rows.get(id);
+    if (r) { r.syncState = "pending"; setSyncLine(id); }
+    syncTimers.set(id, setTimeout(function(){ syncNow(id); }, 1100));
+  }
+
+  async function syncNow(id, isRetry){
+    var r = rows.get(id);
+    if (r && !isRetry) r.syncAttempt = 0;
+    if (!r || r.status === "example") return;
+    var invNo = (rowEls.get(id).inputs.invoiceNumber.value || "").trim();
+    if (!invNo) { r.syncState = "nokey"; setSyncLine(id); refreshStats(); return; }
+    r.syncState = "pending";
+    setSyncLine(id);
+    try {
+      var headers = { "Content-Type": "application/json" };
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res = await fetch("/api/sync-row", {
+        method: "POST", headers: headers,
+        body: JSON.stringify({ rowKey: r.rowKey, values: currentValues(id), fileLink: r.fileLink || "" })
+      });
+      if (res.status === 429) {
+        var b429 = null;
+        try { b429 = await res.json(); } catch (e2) { /* ignore */ }
+        scheduleSyncRetry(id, "busy", b429 && b429.retryAfter);
+        return;
+      }
+      if (!res.ok) throw new Error("http_" + res.status);
+      r.syncState = "ok";
+      r.syncAttempt = 0;
+      lockAutoFieldsAfterSync(id);
+    } catch (e) {
+      scheduleSyncRetry(id, "failed");
+      return;
+    }
+    setSyncLine(id);
+    refreshStats();
+  }
+
+  function buildRow(id, opts){
+    opts = opts || {};
+    var r = {
+      id:id, rowKey: opts.rowKey || makeRowKey(), fileName: opts.fileName || "(manual row)", status: opts.status || "manual",
+      rawText:"", fileLink: opts.fileLink || "", syncState: "idle",
+      // True once this row's Sheet key has been set to its real order ID
+      // (see applyFieldsToInputs) rather than its throwaway starting key —
+      // tracked as its own flag rather than inferred from the key's string
+      // shape, so the duplicate-row guard in uploadFileToDrive doesn't
+      // depend on what the key happens to look like.
+      rowKeyResolved: false,
+      autoFields: new Set(), lockedFields: new Set()
+    };
+    rows.set(id, r);
+
+    var tr = document.createElement("tr");
+    if (r.status === "example") tr.className = "example";
+
+    var tdToggle = document.createElement("td");
+    var srcBtn = document.createElement("button");
+    srcBtn.className = "srcbtn";
+    srcBtn.type = "button";
+    srcBtn.style.display = "none";
+    tdToggle.appendChild(srcBtn);
+    tr.appendChild(tdToggle);
+
+    var tdFile = document.createElement("td");
+    tdFile.className = "file";
+    tr.appendChild(tdFile);
+
+    var inputs = {};
+    var unlockBtns = {};
+    COLUMNS.forEach(function(c){
+      var td = document.createElement("td");
+      td.className = (c.cls ? c.cls + " " : "") + "fieldcell";
+      var inner = document.createElement("div");
+      inner.className = "fieldcell-inner";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.id = "f-" + c.key + "-" + id;
+      input.value = opts[c.key] || "";
+      input.autocomplete = "off";
+      input.style.minWidth = chWidth(c.w) + "px";
+      if (c.formula) {
+        // Order Status is looked up live in the Sheet itself (see
+        // orderStatusFormula in server.js) — nobody types into this one,
+        // here or there, so it's disabled from the start and gets no
+        // unlock button at all.
+        input.disabled = true;
+        input.placeholder = "(from All orders)";
+      } else {
+        input.addEventListener("input", function(){
+          if (c.key === "invoiceNumber" && input.value.trim()) {
+            orderIdIndex.set(input.value.trim(), id);
+            var rr = rows.get(id);
+            if (rr) { rr.rowKey = input.value.trim(); rr.rowKeyResolved = true; }
+          }
+          scheduleSync(id);
+        });
+      }
+      var unlockBtn = document.createElement("button");
+      unlockBtn.type = "button";
+      unlockBtn.className = "unlockbtn";
+      unlockBtn.title = "This field was filled in automatically — click to unlock and edit it";
+      unlockBtn.innerHTML = "&#128274;";
+      unlockBtn.addEventListener("click", function(){ unlockField(id, c.key); });
+      inner.appendChild(input);
+      if (!c.formula) inner.appendChild(unlockBtn);
+      td.appendChild(inner);
+      tr.appendChild(td);
+      inputs[c.key] = input;
+      unlockBtns[c.key] = unlockBtn;
+    });
+
+    var tdStatus = document.createElement("td");
+    var chip = document.createElement("span");
+    var syncEl = document.createElement("div");
+    syncEl.className = "syncline";
+    tdStatus.appendChild(chip);
+    tdStatus.appendChild(syncEl);
+    tr.appendChild(tdStatus);
+
+    var tdRemove = document.createElement("td");
+    var rmBtn = document.createElement("button");
+    rmBtn.className = "iconbtn danger";
+    rmBtn.type = "button";
+    rmBtn.title = "Remove row";
+    rmBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/></svg>';
+    rmBtn.addEventListener("click", function(){ removeRow(id); });
+    tdRemove.appendChild(rmBtn);
+    tr.appendChild(tdRemove);
+
+    var detailTr = document.createElement("tr");
+    detailTr.className = "detail";
+    detailTr.hidden = true;
+    var detailTd = document.createElement("td");
+    detailTd.colSpan = COLUMNS.length + META_COLS;
+    var cap = document.createElement("div");
+    cap.className = "cap";
+    cap.textContent = "Text read from the PDF (for checking the fields above):";
+    var pre = document.createElement("pre");
+    detailTd.appendChild(cap);
+    detailTd.appendChild(pre);
+    var errDiv = document.createElement("div");
+    errDiv.className = "errmsg";
+    detailTd.appendChild(errDiv);
+    var retryBtn = document.createElement("button");
+    retryBtn.className = "retry";
+    retryBtn.type = "button";
+    retryBtn.textContent = "Retry extraction";
+    retryBtn.style.display = "none";
+    retryBtn.addEventListener("click", function(){ retryRow(id); });
+    detailTd.appendChild(retryBtn);
+    detailTr.appendChild(detailTd);
+
+    rowEls.set(id, { tr:tr, detailTr:detailTr, inputs:inputs, unlockBtns:unlockBtns, tdFile:tdFile, statusChip:chip, syncEl:syncEl, pre:pre, srcBtn:srcBtn, errDiv:errDiv, retryBtn:retryBtn });
+    renderFileCell(id);
+    setChip(id);
+    setSyncLine(id);
+    return { tr:tr, detailTr:detailTr };
+  }
+
+  function renderFileCell(id){
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!r || !el) return;
+    if (r.fileLink) {
+      el.tdFile.innerHTML = '<a class="filelink" href="' + esc(r.fileLink) + '" target="_blank" rel="noopener">' + svgFile() + ' View PDF</a>';
+    } else {
+      el.tdFile.innerHTML = '<span class="filename">' + svgFile() + '<span title="' + esc(r.fileName) + '">' + esc(r.fileName) + "</span></span>";
+    }
+  }
+
+  function insertRow(id, opts){
+    var built = buildRow(id, opts);
+    tbody.appendChild(built.tr);
+    tbody.appendChild(built.detailTr);
+    refreshStats();
+  }
+  function removeRow(id){
+    var el = rowEls.get(id);
+    if (!el) return;
+    el.tr.remove(); el.detailTr.remove();
+    rowEls.delete(id); rows.delete(id);
+    orderIdIndex.forEach(function(rowId, orderId){ if (rowId === id) orderIdIndex.delete(orderId); });
+    var t = syncTimers.get(id); if (t) clearTimeout(t);
+    refreshStats();
+  }
+  function clearExamples(){
+    var toRemove = [];
+    rows.forEach(function(r, id){ if (r.status === "example") toRemove.push(id); });
+    toRemove.forEach(removeRow);
+    clearExamplesBtn.hidden = true;
+  }
+  function ensureExamplesCleared(){
+    var has = false;
+    rows.forEach(function(r){ if (r.status === "example") has = true; });
+    if (has) clearExamples();
+  }
+  function showSourceToggle(id){
+    var el = rowEls.get(id);
+    if (!el) return;
+    el.srcBtn.style.display = "inline";
+    el.srcBtn.textContent = "view text";
+    el.srcBtn.onclick = function(){
+      el.detailTr.hidden = !el.detailTr.hidden;
+      el.srcBtn.textContent = el.detailTr.hidden ? "view text" : "hide text";
+    };
+  }
+  function setError(id, msg, retryable){
+    var r = rows.get(id), el = rowEls.get(id);
+    r.status = "error";
+    setChip(id);
+    el.errDiv.textContent = msg;
+    el.retryBtn.style.display = retryable ? "inline" : "none";
+    el.detailTr.hidden = false;
+    showSourceToggle(id);
+    refreshStats();
+  }
+
+  // pdf.js hands back text items in whatever order the PDF's content stream
+  // happens to store them in, which for a table (like an invoice's tax
+  // breakup — unit price / discount / qty / net amount / tax rate / tax
+  // type / tax amount / total amount, one column per cell) is not
+  // necessarily left-to-right, top-to-bottom order. Joining items as-is can
+  // still keep a table roughly readable, but there's no guarantee of it —
+  // this instead groups items into lines by their y-position (from
+  // item.transform[5], the item's vertical baseline) and sorts each line
+  // left-to-right by x, the same idea `pdftotext -layout` uses, so a table
+  // row reads as one line with its columns in visual order, and the AI
+  // extractor gets a much more reliable table to read amounts out of.
+  function reconstructPageText(items){
+    var lines = [];
+    items.forEach(function(it){
+      if (!it.str) return;
+      var y = it.transform[5];
+      var line = null;
+      for (var i = 0; i < lines.length; i++) {
+        if (Math.abs(lines[i].y - y) < 3) { line = lines[i]; break; }
+      }
+      if (!line) { line = { y: y, cells: [] }; lines.push(line); }
+      line.cells.push({ x: it.transform[4], str: it.str });
+    });
+    lines.sort(function(a, b){ return b.y - a.y; }); // PDF y grows upward — top of page first
+    return lines.map(function(l){
+      l.cells.sort(function(a, b){ return a.x - b.x; });
+      return l.cells.map(function(c){ return c.str; }).join(" ").replace(/\s+/g, " ").trim();
+    }).filter(function(s){ return s.length > 0; }).join("\n");
+  }
+
+  async function extractPdfText(file){
+    var buf = await file.arrayBuffer();
+    var doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    var parts = [];
+    var pages = Math.min(doc.numPages, 8);
+    for (var i = 1; i <= pages; i++) {
+      var page = await doc.getPage(i);
+      var content = await page.getTextContent();
+      parts.push(reconstructPageText(content.items));
+    }
+    return parts.join("\n\n");
+  }
+
+  // Cuts down on re-paying for AI extraction when the same invoice batch
+  // gets uploaded again on a later day (the team's cumulative-upload
+  // habit): the exact text pulled from a given PDF is deterministic, so if
+  // this browser has already extracted this same text before, reuse that
+  // result instead of calling the API again. Keyed by a hash of the text,
+  // scoped to this browser only (not shared across teammates or machines —
+  // a genuine cross-team cache would need a server-side lookup, which this
+  // intentionally keeps out of scope for now). Every localStorage access is
+  // wrapped in try/catch: if it's unavailable, full, or throws for any
+  // reason, extraction just proceeds normally with no cache.
+  var EXTRACT_CACHE_PREFIX = "tnm-extract-cache:";
+  // Bump this whenever the set of fields asked of the AI extractor changes
+  // (server's DERIVABLE_KEYS). The cache key used to be just a hash of the
+  // extracted PDF text, with nothing tying it to which fields were being
+  // asked for — so a cached response saved under an older schema kept
+  // getting replayed forever afterwards for that same PDF, silently missing
+  // whatever fields were added since, with no error or indication anything
+  // was stale. This is exactly what made Taxable value/Invoice value/IGST/
+  // CGST/SGST show up blank for invoices that had already been uploaded
+  // once before those 5 fields existed: re-uploading the same PDF kept
+  // reusing the old cached JSON instead of calling the AI again. Baking a
+  // version string into the hash means a schema change invalidates every
+  // old entry at once, with no need to clear anyone's browser storage by
+  // hand.
+  var EXTRACT_SCHEMA_VERSION = "2026-10-01-invoicenumber";
+  async function sha256Hex(str){
+    var enc = new TextEncoder().encode(str);
+    var buf = await crypto.subtle.digest("SHA-256", enc);
+    var bytes = Array.from(new Uint8Array(buf));
+    return bytes.map(function(b){ return b.toString(16).padStart(2, "0"); }).join("");
+  }
+  async function getCachedExtraction(textForApi){
+    if (!(window.crypto && crypto.subtle)) return null;
+    try {
+      var hash = await sha256Hex(EXTRACT_SCHEMA_VERSION + "\n" + textForApi);
+      var raw = localStorage.getItem(EXTRACT_CACHE_PREFIX + hash);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  async function setCachedExtraction(textForApi, data){
+    if (!(window.crypto && crypto.subtle)) return;
+    try {
+      var hash = await sha256Hex(EXTRACT_SCHEMA_VERSION + "\n" + textForApi);
+      localStorage.setItem(EXTRACT_CACHE_PREFIX + hash, JSON.stringify(data));
+    } catch (e) { /* quota exceeded or storage unavailable — skip caching */ }
+  }
+
+  async function callExtractApi(text){
+    var textForApi = text.slice(0, 11000);
+    var cached = await getCachedExtraction(textForApi);
+    if (cached) return cached;
+    var headers = { "Content-Type": "application/json" };
+    if (accessCode) headers["x-access-code"] = accessCode;
+    var res = await fetch("/api/extract", { method: "POST", headers: headers, body: JSON.stringify({ text: textForApi }) });
+    var body = null;
+    try { body = await res.json(); } catch (e) { /* ignore */ }
+    if (!res.ok) {
+      var err = new Error((body && body.error) || ("http_" + res.status));
+      err.code = (body && body.error) || ("http_" + res.status);
+      throw err;
+    }
+    setCachedExtraction(textForApi, body.data);
+    return body.data;
+  }
+
+  async function uploadFileToDrive(id, file){
+    if (!config.driveConfigured) return;
+    try {
+      var fd = new FormData();
+      fd.append("pdf", file, file.name);
+      var headers = {};
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res = await fetch("/api/upload-invoice-file", { method: "POST", headers: headers, body: fd });
+      var body = null;
+      try { body = await res.json(); } catch (e) { /* ignore */ }
+      if (!res.ok || !body || !body.link) return;
+      // If this row got merged into an existing (e.g. Seller-Flex-CSV-only)
+      // row while the upload was in flight, the file link belongs on
+      // whatever row it merged into, not the row that's since been removed.
+      var realId = redirects.get(id) || id;
+      var r = rows.get(realId);
+      if (!r) return;
+      r.fileLink = body.link;
+      renderFileCell(realId);
+      // The Drive upload usually finishes before AI extraction does (it
+      // doesn't wait on the AI call), so syncing here unconditionally used
+      // to sync the row while its order ID — and therefore its Sheet row
+      // key, see applyFieldsToInputs — was still unknown. That wrote a
+      // real Sheet row under the row's throwaway random-UUID key, with a
+      // blank order-id and so a VLOOKUP("", …) Order Status formula; once
+      // extraction finished moments later it re-keyed the row to
+      // "order:<id>" and synced AGAIN, which — since findRowByKey looks
+      // rows up by that new key — couldn't find the row it had just
+      // created and appended a second, complete one instead. One upload,
+      // two Sheet rows, one of them permanently blank.
+      //
+      // Gating this on r.status (only skip while "reading"/"extracting")
+      // wasn't quite enough: an invoice extraction can also legitimately
+      // fail — a PDF with no readable order ID, a rate limit, an upstream
+      // error — landing the row in a terminal "error"/"manual" status
+      // while it's STILL keyed by its throwaway random UUID, with nobody
+      // having typed anything into it yet. The moment the file link
+      // arrived after that, the same stray-row problem happened again,
+      // just via a different route. The real invariant is about the row's
+      // KEY, not its extraction status: only let this trigger a sync once
+      // the row has a stable Sheet identity — either extraction resolved
+      // its key to the real order ID, or a previous sync already created a
+      // Sheet row under whatever key it currently has. Otherwise the file link
+      // just sits on `r` and rides along on whichever sync happens next —
+      // extraction's own (runExtraction / mergeExtractedRowIntoExisting),
+      // or the row's own "input" listener the moment someone types
+      // something into it — instead of writing a new, nearly-empty row
+      // under a key nothing will ever find again.
+      if (r.rowKeyResolved || r.syncState === "ok") {
+        scheduleSync(realId);
+      }
+    } catch (e) { /* leave file unlinked; row still has its data */ }
+  }
+
+  // Restricted to Seller Flex invoices for now (Manoj's call, 2026-09-28) —
+  // every Seller Flex tax invoice's Invoice Number / Invoice Details carries
+  // a "JJGZ" marker (e.g. "Invoice Number :JJGZ-179"), so this is a cheap,
+  // no-AI-call way to tell a Seller Flex invoice apart from anything else
+  // before the team is ready to expand the tool beyond it. Checked against
+  // the PDF's own extracted text (free, client-side) BEFORE either the
+  // paid AI extraction call or the Drive upload happen, so a disallowed
+  // invoice costs nothing and never lands in Drive or the Sheet — just a
+  // rejection message on its row. Case-insensitive since text extraction
+  // doesn't guarantee original casing survives.
+  var ALLOWED_INVOICE_MARKER = /jjgz/i;
+  // The invoice number is the Invoices tab's unique key, so it's read
+  // straight from the PDF text when possible (deterministic, e.g.
+  // "Invoice Number :JJGZ-179") and the AI's answer is only a fallback.
+  function withInvoiceNumber(data, text){
+    data = Object.assign({}, data || {});
+    var t = String(text || "");
+    var fromText = "";
+    var labelled = t.match(/Invoice\s*(?:Number|No\.?|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]*)/i);
+    if (labelled && /jjgz/i.test(labelled[1])) fromText = labelled[1];
+    if (!fromText) {
+      var bare = t.match(/\b([A-Z0-9]*JJGZ[\-\/]?[A-Z0-9\-\/]*\d)\b/i);
+      if (bare) fromText = bare[1];
+    }
+    fromText = fromText.toUpperCase();
+    var fromAi = typeof data.invoiceNumber === "string" ? data.invoiceNumber.replace(/\s+/g, "").toUpperCase() : "";
+    data.invoiceNumber = fromText || fromAi;
+    return data;
+  }
+  function isAllowedInvoice(text){
+    return ALLOWED_INVOICE_MARKER.test(text || "");
+  }
+
+  async function processFile(file, batch){
+    var id = uid();
+    uploadedCount += 1;
+    insertRow(id, { fileName: file.name, status: "reading" });
+    ensureExamplesCleared();
+    setChip(id);
+
+    var r = rows.get(id), el = rowEls.get(id);
+    var text = "";
+    try {
+      text = await extractPdfText(file);
+    } catch (e) {
+      r.status = "manual";
+      setChip(id);
+      el.pre.textContent = "(couldn't read text from this PDF)";
+      el.errDiv.textContent = "Couldn't read this PDF automatically — enter its details manually.";
+      el.detailTr.hidden = false;
+      refreshStats();
+      return;
+    }
+    r.rawText = text;
+    el.pre.textContent = text.trim() ? text : "(no extractable text found in this PDF — it may be a scanned image)";
+    showSourceToggle(id);
+
+    // Only reject on the Seller Flex check when there's actual text to
+    // check — a blank/unreadable PDF (a scan, say) isn't necessarily a
+    // non-Seller-Flex invoice, it just couldn't be read, so that case is
+    // left to fall through to the existing "no extractable text" handling
+    // below instead of being misreported as the wrong invoice type.
+    if (text.trim() && !isAllowedInvoice(text)) {
+      // No per-file error row/message here any more — a bulk .zip can mix
+      // in dozens of non-Seller-Flex invoices, and a row (plus its own
+      // rejection message) for every single one used to bury the invoices
+      // that DID matter under a wall of identical "not Seller Flex"
+      // rows. This file's temporary row is removed outright, and the
+      // rejection is folded into one running summary line instead — see
+      // updateRejectedBanner / rejectedResult.
+      removeRow(id);
+      if (batch) {
+        batch.rejected.push(file.name);
+        updateRejectedBanner(batch);
+      }
+      return;
+    }
+
+    uploadFileToDrive(id, file); // fire-and-forget; doesn't block field extraction
+
+    await runExtraction(id, text);
+  }
+
+  // Called when a PDF's extraction reveals an order ID that's already on
+  // another row (almost always a row the Seller Flex CSV created earlier,
+  // before this invoice existed). Rather than leaving two rows for the same
+  // order, this folds the freshly-extracted fields and the file identity
+  // into that existing row, then removes the temporary "reading this PDF"
+  // row that was standing in for it.
+  function mergeExtractedRowIntoExisting(tempId, targetId, data){
+    var tempEl = rowEls.get(tempId), tempR = rows.get(tempId);
+    var targetEl = rowEls.get(targetId), targetR = rows.get(targetId);
+    if (!tempEl || !tempR || !targetEl || !targetR) return;
+    targetR.fileName = tempR.fileName;
+    if (tempR.fileLink) targetR.fileLink = tempR.fileLink;
+    targetR.rawText = tempR.rawText;
+    targetR.status = "extracted";
+    applyFieldsToInputs(targetId, data, true);
+    renderFileCell(targetId);
+    targetEl.pre.textContent = tempEl.pre.textContent;
+    if (tempR.rawText) showSourceToggle(targetId);
+    setChip(targetId);
+    scheduleSync(targetId);
+    redirects.set(tempId, targetId);
+    removeRow(tempId);
+    refreshStats();
+  }
+
+  // MAX_RATE_LIMIT_RETRIES / retry delays: a bulk .zip of invoices only
+  // runs 2 extraction calls at a time (see the `worker()` pool in
+  // handleFiles), but a big enough batch can still outrun the server's
+  // per-minute rate limit — that used to just strand the row with a
+  // "Rate limited" error needing a manual click per row, silently
+  // leaving several invoices out of a batch (e.g. 11 of 49 in one real
+  // upload). A rate-limited extraction now retries itself automatically
+  // with a short backoff, up to MAX_RATE_LIMIT_RETRIES times, via the
+  // `attempt` parameter — so a normal-sized batch recovers on its own and
+  // only a truly persistent problem (or a very large batch that keeps
+  // outrunning the limit) still needs a manual "Retry extraction" click.
+  var MAX_RATE_LIMIT_RETRIES = 6;
+  async function runExtraction(id, text, attempt){
+    attempt = attempt || 0;
+    var r = rows.get(id), el = rowEls.get(id);
+    if (!config.aiConfigured) {
+      r.status = "manual";
+      setChip(id);
+      refreshStats();
+      return;
+    }
+    r.status = "extracting";
+    setChip(id);
+    refreshStats();
+    try {
+      var data = await callExtractApi(text);
+      data = withInvoiceNumber(data, text);
+      var extractedOrderId = (data && typeof data.invoiceNumber === "string" ? data.invoiceNumber.trim() : "");
+      var existingId = extractedOrderId ? orderIdIndex.get(extractedOrderId) : null;
+      if (existingId && existingId !== id && rows.has(existingId)) {
+        mergeExtractedRowIntoExisting(id, existingId, data);
+        return;
+      }
+      applyFieldsToInputs(id, data, true);
+      r.status = "extracted";
+      setChip(id);
+      el.errDiv.textContent = "";
+      el.retryBtn.style.display = "none";
+      scheduleSync(id);
+    } catch (e) {
+      var code = e && e.code;
+      if (code === "rate_limited" && attempt < MAX_RATE_LIMIT_RETRIES) {
+        var delaySeconds = Math.min(30, 4 * (attempt + 1));
+        el.errDiv.textContent = "Rate limited by a large batch — retrying automatically in " + delaySeconds + "s…";
+        el.detailTr.hidden = false;
+        showSourceToggle(id);
+        refreshStats();
+        setTimeout(function(){ runExtraction(id, text, attempt + 1); }, delaySeconds * 1000);
+        return;
+      }
+      var msg = ({
+        rate_limited: "Rate limited — wait a moment and retry.",
+        server_not_configured: "The server isn't set up with an API key yet — enter fields manually for now.",
+        bad_access_code: "The passcode changed — reload the page and re-enter it.",
+        invalid_json: "Couldn't parse the extracted fields — try again or fill in manually.",
+        empty_text: "No text to extract — enter fields manually.",
+        upstream_error: "Extraction failed — try again or fill in manually."
+      })[code] || "Extraction failed — try again or fill in manually.";
+      setError(id, msg, code !== "bad_access_code" && code !== "server_not_configured");
+    }
+    refreshStats();
+  }
+
+  function retryRow(id){
+    var r = rows.get(id);
+    if (!r) return;
+    if (!r.rawText) { r.status = "manual"; setChip(id); refreshStats(); return; }
+    runExtraction(id, r.rawText);
+  }
+
+  function isPdfFile(f){ return f.type === "application/pdf" || /\.pdf$/i.test(f.name); }
+  function isZipFile(f){ return f.type === "application/zip" || f.type === "application/x-zip-compressed" || /\.zip$/i.test(f.name); }
+
+  async function extractPdfsFromZip(zipFile){
+    var out = [];
+    if (!window.JSZip) return out; // library failed to load; caller shows nothing rather than erroring
+    try {
+      var buf = await zipFile.arrayBuffer();
+      var zip = await JSZip.loadAsync(buf);
+      var entries = [];
+      zip.forEach(function(relPath, entry){
+        if (!entry.dir && /\.pdf$/i.test(entry.name) && !/^__MACOSX\//.test(entry.name)) entries.push(entry);
+      });
+      for (var i = 0; i < entries.length; i++) {
+        var blob = await entries[i].async("blob");
+        var baseName = entries[i].name.split("/").pop();
+        out.push(new File([blob], baseName, { type: "application/pdf" }));
+      }
+    } catch (e) { /* not a valid/readable zip — skip it silently, same as any other unsupported file */ }
+    return out;
+  }
+
+  async function handleFiles(fileList){
+    var incoming = Array.prototype.slice.call(fileList);
+    var files = [];
+    for (var i = 0; i < incoming.length; i++) {
+      var f = incoming[i];
+      if (isZipFile(f)) {
+        var extracted = await extractPdfsFromZip(f);
+        files = files.concat(extracted);
+      } else if (isPdfFile(f)) {
+        files.push(f);
+      }
+    }
+    if (!files.length) return;
+    // Tracks every file from THIS drop/selection that the Seller Flex
+    // check rejects, so they're reported as one summary line instead of a
+    // separate error row per file — a bulk .zip can easily mix in dozens
+    // of non-Seller-Flex invoices alongside the ones this tool handles.
+    var batch = { rejected: [] };
+    rejectedResult.hidden = true;
+    var queue = files.slice();
+    function worker(){
+      var next = queue.shift();
+      if (!next) return Promise.resolve();
+      return processFile(next, batch).then(worker);
+    }
+    worker(); worker();
+  }
+
+  function updateRejectedBanner(batch){
+    if (!batch.rejected.length) { rejectedResult.hidden = true; return; }
+    var maxNames = 10;
+    var shown = batch.rejected.slice(0, maxNames).join(", ");
+    var extra = batch.rejected.length > maxNames ? " (+" + (batch.rejected.length - maxNames) + " more)" : "";
+    var n = batch.rejected.length;
+    rejectedResult.textContent = n + (n === 1 ? " file" : " files") + " skipped — not Seller Flex invoices (no \"JJGZ\" in the invoice number): " + shown + extra;
+    rejectedResult.hidden = false;
+  }
+
+  fileInput.addEventListener("change", function(){ handleFiles(fileInput.files); fileInput.value = ""; });
+  dropzone.addEventListener("dragover", function(e){ e.preventDefault(); dropzone.classList.add("drag"); });
+  ["dragleave", "drop"].forEach(function(evt){
+    dropzone.addEventListener(evt, function(e){ e.preventDefault(); dropzone.classList.remove("drag"); });
+  });
+  dropzone.addEventListener("drop", function(e){
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+  });
+  dropzone.addEventListener("click", function(e){
+    if (e.target === fileInput) return;
+    e.preventDefault();
+    fileInput.click();
+  });
+
+  function readFileAsText(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(String(reader.result || "")); };
+      reader.onerror = function(){ reject(reader.error || new Error("read_failed")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function formatInr(n){
+    var num = Number(n) || 0;
+    return "₹" + num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  async function handleOrdersCsv(file){
+    ordersResult.hidden = false;
+    ordersResult.className = "ordersresult";
+    ordersResult.textContent = "Reading " + file.name + "…";
+    var text;
+    try {
+      text = await readFileAsText(file);
+    } catch (e) {
+      ordersResult.className = "ordersresult err";
+      ordersResult.textContent = "Couldn't read that file.";
+      return;
+    }
+    try {
+      var headers = { "Content-Type": "application/json" };
+      if (accessCode) headers["x-access-code"] = accessCode;
+      var res, body, attempt = 0;
+      var ORDERS_BACKOFF_S = [25, 35, 45, 60, 60, 60];
+      while (true) {
+        ordersResult.className = "ordersresult";
+        ordersResult.textContent = "Importing " + file.name + "…";
+        res = await fetch("/api/import-orders", { method: "POST", headers: headers, body: JSON.stringify({ csv: text }) });
+        body = null;
+        try { body = await res.json(); } catch (e) { /* ignore */ }
+        if (res.status !== 429 || attempt >= ORDERS_BACKOFF_S.length) break;
+        // Google Sheets is briefly over its per-minute limit (usually while
+        // an invoice batch is saving) — wait it out with a visible countdown.
+        var waitS = Math.max(ORDERS_BACKOFF_S[attempt], (body && body.retryAfter) || 0);
+        attempt += 1;
+        var until = Date.now() + waitS * 1000;
+        ordersResult.className = "ordersresult err";
+        await new Promise(function(resolve){
+          function tick(){
+            var left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+            ordersResult.textContent = "Google Sheets busy — retrying the import automatically in " + left + "s (attempt " + (attempt + 1) + " of " + (ORDERS_BACKOFF_S.length + 1) + "). Keep this page open.";
+            if (left <= 0) { clearInterval(t); resolve(); }
+          }
+          var t = setInterval(tick, 1000);
+          tick();
+        });
+      }
+      if (!res.ok) throw new Error(res.status === 429 ? "Google Sheets is still busy after several retries — try again in a couple of minutes" : ((body && body.message) || (body && body.error) || ("http_" + res.status)));
+
+      // The server does the aggregating AND the "All orders" tab upsert in
+      // one round trip now — orders never touch this page's row table at
+      // all (that's only ever populated from invoice PDFs). This just
+      // reports what happened.
+      var summary = body.summary || {};
+      var bits = [
+        "Imported " + (summary.totalShipments || 0) + " shipment" + (summary.totalShipments === 1 ? "" : "s") + " (" + (summary.totalOrders || 0) + " order" + (summary.totalOrders === 1 ? "" : "s") + ") from " + file.name,
+        (summary.created || 0) + " new row" + (summary.created === 1 ? "" : "s") + " in All orders",
+        (summary.updated || 0) + " existing row" + (summary.updated === 1 ? "" : "s") + " updated"
+      ];
+      if (summary.cancelledOrders) bits.push(summary.cancelledOrders + " cancelled shipment" + (summary.cancelledOrders === 1 ? "" : "s"));
+      ordersResult.className = "ordersresult";
+      ordersResult.textContent = bits.join(" — ") + ". Total order value: " + formatInr(summary.ordersValueTotal) + ".";
+    } catch (e) {
+      ordersResult.className = "ordersresult err";
+      ordersResult.textContent = "Couldn't import that file — " + (e && e.message ? e.message : "unknown error") + ".";
+    }
+  }
+
+  ordersFileInput.addEventListener("change", function(){
+    var f = ordersFileInput.files && ordersFileInput.files[0];
+    ordersFileInput.value = "";
+    if (f) handleOrdersCsv(f);
+  });
+  ordersDropzone.addEventListener("dragover", function(e){ e.preventDefault(); ordersDropzone.classList.add("drag"); });
+  ["dragleave", "drop"].forEach(function(evt){
+    ordersDropzone.addEventListener(evt, function(e){ e.preventDefault(); ordersDropzone.classList.remove("drag"); });
+  });
+  ordersDropzone.addEventListener("drop", function(e){
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleOrdersCsv(f);
+  });
+  ordersDropzone.addEventListener("click", function(e){
+    if (e.target === ordersFileInput) return;
+    e.preventDefault();
+    ordersFileInput.click();
+  });
+
+  addRowBtn.addEventListener("click", function(){
+    var id = uid();
+    insertRow(id, { fileName: "(manual row)", status: "manual" });
+    ensureExamplesCleared();
+    rowEls.get(id).inputs.buyerName.focus();
+  });
+  clearExamplesBtn.addEventListener("click", clearExamples);
+
+  exportBtn.addEventListener("click", function(){
+    var header = ["Source file"].concat(COLUMNS.map(function(c){ return c.label; })).concat(["Invoice File"]);
+    var aoa = [header];
+    rows.forEach(function(r, id){
+      if (r.status === "example") return;
+      var el = rowEls.get(id);
+      var row = [r.fileName];
+      COLUMNS.forEach(function(c){ row.push(el.inputs[c.key].value); });
+      row.push(r.fileLink || "");
+      aoa.push(row);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 22 }].concat(COLUMNS.map(function(c){ return { wch: c.w }; })).concat([{ wch: 30 }]);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+    var out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    var blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var d = new Date();
+    var stamp = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "tyresnmore-invoices-" + stamp + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  });
+
+  function seedExamples(){
+    insertRow(uid(), {
+      fileName: "sample-amazon-invoice.pdf", status: "example",
+      invoiceNumber: "JJGZ-179",
+      orderStatus: "Shipped",
+      supplierName: "Apollo Tyres Ltd.",
+      taxableValue: "13081.36", invoiceValue: "15436.00", igst: "0.00", cgst: "1177.32", sgst: "1177.32",
+      orderId: "406-9432208-5153169", orderItemId: "34827195028426",
+      purchaseDate: "12/08/2026", paymentsDate: "13/08/2026",
+      buyerName: "Rohan Mehta", buyerPhoneNumber: "98xxxxxx21",
+      sku: "TNM-APL-AMZ4G-175-65-R14", numberOfItems: "1", productName: "Apollo Amazer 4G Life 175/65 R14 Tubeless Car Tyre",
+      quantityPurchased: "4", quantityShipped: "4", quantityToShip: "0", shipServiceLevel: "Standard",
+      recipientName: "Rohan Mehta", shipAddress1: "12/4 Lakeview Residency", shipAddress2: "Baner Road", shipAddress3: "",
+      shipCity: "Pune", shipState: "Maharashtra", shipPostalCode: "411045",
+      accountsRemarks: "TnM invoice raised 15/08"
+    });
+    insertRow(uid(), {
+      fileName: "sample-tnm-billing.pdf", status: "example",
+      invoiceNumber: "JJGZ-180",
+      orderStatus: "Packed",
+      supplierName: "JK Tyre & Industries",
+      taxableValue: "1609.32", invoiceValue: "1899.00", igst: "289.68", cgst: "0.00", sgst: "0.00",
+      orderId: "406-5217734-9081142", orderItemId: "34991028447319",
+      purchaseDate: "01/09/2026", paymentsDate: "02/09/2026",
+      buyerName: "Sana Iqbal", buyerPhoneNumber: "91xxxxxx47",
+      sku: "TNM-JK-WCS15-4PC", numberOfItems: "1", productName: "JK Wheel Cover Set 15-inch",
+      quantityPurchased: "1", quantityShipped: "1", quantityToShip: "0", shipServiceLevel: "Standard",
+      recipientName: "Sana Iqbal", shipAddress1: "Flat 302, Silver Oak Apartments", shipAddress2: "Banjara Hills", shipAddress3: "",
+      shipCity: "Hyderabad", shipState: "Telangana", shipPostalCode: "500034",
+      accountsRemarks: ""
+    });
+    clearExamplesBtn.hidden = false;
+    refreshStats();
+  }
+
+  function updateBanner(){
+    var msgs = [];
+    if (!config.aiConfigured) msgs.push("Auto-fill from AI isn't set up on this server yet — fields will need to be entered manually.");
+    if (!config.driveConfigured) msgs.push("PDF storage isn't set up yet — uploaded files won't be attached to their row.");
+    if (!config.sheetsConfigured) msgs.push("Google Sheet sync isn't set up yet — rows will only exist in this browser tab until you export.");
+    if (msgs.length) {
+      aiBannerText.textContent = msgs.join(" ");
+      aiBanner.classList.add("show");
+    } else {
+      aiBanner.classList.remove("show");
+    }
+    statusBadge.textContent = config.sheetsConfigured
+      ? "No account needed · syncing to Google Sheet"
+      : "No account needed · Google Sheet sync not yet configured";
+  }
+
+  function startApp(){
+    gate.hidden = true;
+    app.hidden = false;
+    buildHead();
+    fieldCountHint.textContent = COLUMNS.length + " fields · scroll the table sideways to see them all";
+    updateBanner();
+    seedExamples();
+  }
+
+  async function boot(){
+    try {
+      var res = await fetch("/api/config");
+      var cfg = await res.json();
+      config.requiresAccessCode = !!cfg.requiresAccessCode;
+      config.sheetsConfigured = !!cfg.sheetsConfigured;
+      config.driveConfigured = !!cfg.driveConfigured;
+      config.aiConfigured = cfg.sheetsConfigured || cfg.driveConfigured || true; // refined below by actual extract calls
+      config.aiConfigured = true; // optimistic; /api/extract itself reports server_not_configured per-call if wrong
+    } catch (e) { /* server may be starting up; fall through without a gate */ }
+
+    if (!config.requiresAccessCode) { startApp(); return; }
+    if (accessCode) { startApp(); return; } // already unlocked this browser tab session
+
+    gate.hidden = false;
+    gateBtn.addEventListener("click", async function(){
+      var v = gateInput.value.trim();
+      if (!v) { gateErr.textContent = "Enter the passcode."; return; }
+      gateBtn.disabled = true;
+      gateErr.textContent = "";
+      try {
+        var res2 = await fetch("/api/verify-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: v }) });
+        if (!res2.ok) { gateErr.textContent = "That passcode isn't right — try again."; gateBtn.disabled = false; return; }
+        accessCode = v;
+        sessionStorage.setItem("tnm_access_code", v);
+        startApp();
+      } catch (e) {
+        gateErr.textContent = "Couldn't reach the server — try again.";
+        gateBtn.disabled = false;
+      }
+    });
+    gateInput.addEventListener("keydown", function(e){ if (e.key === "Enter") gateBtn.click(); });
+    gateInput.focus();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
