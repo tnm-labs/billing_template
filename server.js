@@ -40,13 +40,16 @@ const anthropic = apiKey ? new Anthropic({ apiKey }) : null;
 const hits = new Map();
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 100;
-function isRateLimited(ip) {
+// `max` overrides the default cap — Sheet saves get a higher one because
+// each invoice saves twice (Drive link, then AI fields) and they no longer
+// cost AI money or (thanks to the key-column cache) much Sheets quota.
+function isRateLimited(ip, max) {
   const now = Date.now();
   const entry = hits.get(ip) || { count: 0, reset: now + WINDOW_MS };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + WINDOW_MS; }
   entry.count += 1;
   hits.set(ip, entry);
-  return entry.count > MAX_PER_WINDOW;
+  return entry.count > (max || MAX_PER_WINDOW);
 }
 
 // ------------------------------------------------------------------
@@ -238,6 +241,28 @@ const tabSheetIds = {};          // tab name -> numeric sheetId (needed for row 
 const dedupedTabs = {};          // tab name -> true once duplicate rows were removed this process
 const HEADER_RECHECK_MS = 60 * 1000;
 
+// ---- Google Sheets read-quota protection ----
+// Google allows ~60 read requests per minute per account. Every invoice
+// save used to read the Invoice Number column to find its row, and each
+// invoice saves twice (Drive link, then AI fields) — so a bulk re-upload of
+// 40+ invoices blew through the quota and every save (and any orders-CSV
+// import at the same time) failed with "Quota exceeded … Read requests".
+// The key columns are now read once and kept in memory for a short while;
+// rows this server appends are added to the cache directly, so a batch of
+// 100 invoices costs a handful of reads instead of ~200.
+const KEY_CACHE_MS = 20 * 1000;
+let invoiceKeyCache = null; // { at, keys: [], orderIds: [] } — index 0 = sheet row 1
+function invalidateInvoiceKeyCache() { invoiceKeyCache = null; }
+
+// True for Google's "quota exceeded / rate limit" errors (HTTP 429).
+function isQuotaError(e) {
+  const status = e && (e.code || e.status || (e.response && e.response.status));
+  return status === 429 || /quota exceeded|rate ?limit/i.test((e && e.message) || "");
+}
+// How long the client should wait before retrying. Google's per-minute
+// quota frees up as the minute rolls over, so ~20-30s is usually enough.
+const QUOTA_RETRY_AFTER_S = 25;
+
 async function initGoogle() {
   const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!keyRaw) {
@@ -404,6 +429,7 @@ async function ensureHeaderRow(tab, header, opts) {
   }
   if (structural.length) {
     await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: structural } });
+    invalidateInvoiceKeyCache();
   }
   await sheetsClient.spreadsheets.values.update({
     spreadsheetId: sheetId,
@@ -443,6 +469,7 @@ async function dedupeTab(tab, lastColIndex, keyFn) {
       deleteDimension: { range: { sheetId: gid, dimension: "ROWS", startIndex: i + 1, endIndex: i + 2 } }
     }));
     await sheetsClient.spreadsheets.batchUpdate({ spreadsheetId: process.env.GOOGLE_SHEET_ID, requestBody: { requests } });
+    invalidateInvoiceKeyCache();
     console.log("dedupeTab(" + tab + "): removed " + toDelete.length + " duplicate rows");
   }
   dedupedTabs[tab] = true;
@@ -689,27 +716,39 @@ function orderCreationFormula(orderId) {
 // Invoice Number cell still holds this invoice's ORDER ID (old rows were
 // keyed by order ID). Claiming that legacy row means re-uploading an old invoice
 // converts its row in place instead of adding a second one.
-async function findInvoiceRow(invoiceNumber, orderId) {
+async function getInvoiceKeyColumns() {
+  if (invoiceKeyCache && Date.now() - invoiceKeyCache.at < KEY_CACHE_MS) return invoiceKeyCache;
   const idCol = colLetterFor(invoiceColIndex("orderId"));
   const keyCol = colLetterFor(invoiceColIndex("invoiceNumber"));
   const resp = await sheetsClient.spreadsheets.values.batchGet({
     spreadsheetId: process.env.GOOGLE_SHEET_ID,
     ranges: [quoteTab(invoicesTabName()) + "!" + keyCol + ":" + keyCol, quoteTab(invoicesTabName()) + "!" + idCol + ":" + idCol]
   });
-  const colA = (resp.data.valueRanges[0] && resp.data.valueRanges[0].values) || [];
-  const colId = (resp.data.valueRanges[1] && resp.data.valueRanges[1].values) || [];
-  const cell = (col, i) => String((col[i] && col[i][0]) == null ? "" : col[i][0]).trim();
-  for (let i = 1; i < colA.length; i++) {
-    if (cell(colA, i) === invoiceNumber) return i + 1;
+  const flat = (vr) => ((vr && vr.values) || []).map((r) => String((r && r[0]) == null ? "" : r[0]).trim());
+  invoiceKeyCache = { at: Date.now(), keys: flat(resp.data.valueRanges[0]), orderIds: flat(resp.data.valueRanges[1]) };
+  return invoiceKeyCache;
+}
+
+async function findInvoiceRow(invoiceNumber, orderId) {
+  const { keys, orderIds } = await getInvoiceKeyColumns();
+  for (let i = 1; i < keys.length; i++) {
+    if (keys[i] === invoiceNumber) return i + 1;
   }
   const oid = String(orderId || "").trim();
   if (oid && oid !== invoiceNumber) {
-    for (let i = 1; i < colA.length; i++) {
+    for (let i = 1; i < keys.length; i++) {
       // legacy marker: the Invoice Number cell equals the row's own order-id cell
-      if (cell(colA, i) === oid && cell(colId, i) === oid) return i + 1;
+      if (keys[i] === oid && orderIds[i] === oid) return i + 1;
     }
   }
   return null;
+}
+
+// Keeps the cached key columns in step with a write this server just made.
+function rememberInvoiceRow(rowNumber, invoiceNumber, orderId) {
+  if (!invoiceKeyCache || !rowNumber) { invalidateInvoiceKeyCache(); return; }
+  invoiceKeyCache.keys[rowNumber - 1] = invoiceNumber;
+  invoiceKeyCache.orderIds[rowNumber - 1] = String(orderId || "").trim();
 }
 
 // Invoices tab is keyed by INVOICE NUMBER (column B): one row per invoice.
@@ -740,14 +779,18 @@ async function syncRowToSheet(invoiceNumber, values, fileLink) {
         valueInputOption: "USER_ENTERED",
         requestBody: { values: [rowValues.slice(1)] }
       });
+      rememberInvoiceRow(existingRow, invoiceNumber, values && values.orderId);
     } else {
-      await sheetsClient.spreadsheets.values.append({
+      const appended = await sheetsClient.spreadsheets.values.append({
         spreadsheetId: sheetId,
         range: quoteTab(tab) + "!A:A",
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS",
         requestBody: { values: [rowValues] }
       });
+      // e.g. "'Invoices'!A57:AF57" -> row 57
+      const m = String((appended.data && appended.data.updates && appended.data.updates.updatedRange) || "").match(/![A-Z]+(\d+)/);
+      rememberInvoiceRow(m ? Number(m[1]) : null, invoiceNumber, values && values.orderId);
     }
   });
 }
@@ -1077,7 +1120,7 @@ app.post("/api/upload-invoice-file", upload.single("pdf"), async (req, res) => {
 
 app.post("/api/sync-row", async (req, res) => {
   if (!checkAccessCode(req, res)) return;
-  if (isRateLimited("sync:" + req.ip)) return res.status(429).json({ error: "rate_limited" });
+  if (isRateLimited("sync:" + req.ip, 400)) return res.status(429).json({ error: "rate_limited" });
   if (!sheetsReady()) return res.status(500).json({ error: "sheets_not_configured" });
 
   const values = (req.body && req.body.values) || {};
@@ -1091,6 +1134,7 @@ app.post("/api/sync-row", async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error("sheet sync failed:", e && e.message);
+    if (isQuotaError(e)) return res.status(429).json({ error: "sheets_quota", retryAfter: QUOTA_RETRY_AFTER_S });
     res.status(502).json({ error: "sheet_sync_failed", message: (e && e.message) || "unknown" });
   }
 });
@@ -1120,6 +1164,7 @@ app.post("/api/import-orders", async (req, res) => {
     res.json({ summary: Object.assign({}, result.summary, { created, updated }) });
   } catch (e) {
     console.error("orders sheet sync failed:", e && e.message);
+    if (isQuotaError(e)) return res.status(429).json({ error: "sheets_quota", retryAfter: QUOTA_RETRY_AFTER_S });
     res.status(502).json({ error: "orders_sync_failed", message: (e && e.message) || "unknown" });
   }
 });
