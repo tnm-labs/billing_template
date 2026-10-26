@@ -384,13 +384,14 @@
       idle: ["syncline", ""],
       pending: ["syncline", "Saving to Sheet…"],
       ok: ["syncline ok", "Synced to Sheet ✓"],
-      err: ["syncline err", "Sheet sync failed — will retry"],
+      err: ["syncline err", "Sheet sync failed — edit any field or re-upload to try again"],
+      wait: ["syncline err", ""], // text filled in below with a live countdown
       off: ["syncline", "Sheet sync not set up"],
       nokey: ["syncline err", "Add the invoice number to save this row"]
     };
     var m = map[r.syncState] || map.idle;
     el.syncEl.className = m[0];
-    el.syncEl.textContent = m[1];
+    el.syncEl.textContent = r.syncState === "wait" ? waitText(r) : m[1];
   }
 
   // markAuto: true when `data` came from an automated source (AI extraction
@@ -475,6 +476,46 @@
     return out;
   }
 
+  // ---- automatic retry with a visible countdown ----
+  // Google Sheets limits how many reads/writes the app can make per minute,
+  // so a big batch can briefly hit "Google Sheets busy". Instead of failing,
+  // the row waits and retries on its own, showing how long until the next
+  // attempt. Other failures retry a few times too, then stop.
+  var SYNC_BACKOFF_S = [25, 35, 45, 60, 60, 60, 60, 60];
+  var countdownTicker = null;
+  function secondsLeft(at){ return Math.max(0, Math.ceil((at - Date.now()) / 1000)); }
+  function waitText(r){
+    var s = secondsLeft(r.retryAt || 0);
+    var why = r.waitReason === "busy" ? "Google Sheets busy" : "Sheet sync failed";
+    return why + " — retrying in " + s + "s (attempt " + ((r.syncAttempt || 0) + 1) + " of " + (SYNC_BACKOFF_S.length + 1) + ")";
+  }
+  function ensureCountdownTicker(){
+    if (countdownTicker) return;
+    countdownTicker = setInterval(function(){
+      var any = false;
+      rows.forEach(function(r, id){ if (r.syncState === "wait") { any = true; setSyncLine(id); } });
+      if (!any) { clearInterval(countdownTicker); countdownTicker = null; }
+    }, 1000);
+  }
+  function scheduleSyncRetry(id, reason, serverSeconds){
+    var r = rows.get(id);
+    if (!r) return;
+    var attempt = r.syncAttempt || 0;
+    var maxAttempts = reason === "busy" ? SYNC_BACKOFF_S.length : 3;
+    if (attempt >= maxAttempts) { r.syncState = "err"; r.syncAttempt = 0; setSyncLine(id); refreshStats(); return; }
+    var wait = Math.max(SYNC_BACKOFF_S[attempt], serverSeconds || 0);
+    r.syncAttempt = attempt + 1;
+    r.waitReason = reason;
+    r.retryAt = Date.now() + wait * 1000;
+    r.syncState = "wait";
+    var existing = syncTimers.get(id);
+    if (existing) clearTimeout(existing);
+    syncTimers.set(id, setTimeout(function(){ syncNow(id, true); }, wait * 1000));
+    setSyncLine(id);
+    ensureCountdownTicker();
+    refreshStats();
+  }
+
   function scheduleSync(id){
     if (!config.sheetsConfigured) { var r = rows.get(id); if (r) { r.syncState = "off"; setSyncLine(id); } return; }
     var existing = syncTimers.get(id);
@@ -484,8 +525,9 @@
     syncTimers.set(id, setTimeout(function(){ syncNow(id); }, 1100));
   }
 
-  async function syncNow(id){
+  async function syncNow(id, isRetry){
     var r = rows.get(id);
+    if (r && !isRetry) r.syncAttempt = 0;
     if (!r || r.status === "example") return;
     var invNo = (rowEls.get(id).inputs.invoiceNumber.value || "").trim();
     if (!invNo) { r.syncState = "nokey"; setSyncLine(id); refreshStats(); return; }
@@ -498,11 +540,19 @@
         method: "POST", headers: headers,
         body: JSON.stringify({ rowKey: r.rowKey, values: currentValues(id), fileLink: r.fileLink || "" })
       });
+      if (res.status === 429) {
+        var b429 = null;
+        try { b429 = await res.json(); } catch (e2) { /* ignore */ }
+        scheduleSyncRetry(id, "busy", b429 && b429.retryAfter);
+        return;
+      }
       if (!res.ok) throw new Error("http_" + res.status);
       r.syncState = "ok";
+      r.syncAttempt = 0;
       lockAutoFieldsAfterSync(id);
     } catch (e) {
-      r.syncState = "err";
+      scheduleSyncRetry(id, "failed");
+      return;
     }
     setSyncLine(id);
     refreshStats();
@@ -1131,10 +1181,32 @@
     try {
       var headers = { "Content-Type": "application/json" };
       if (accessCode) headers["x-access-code"] = accessCode;
-      var res = await fetch("/api/import-orders", { method: "POST", headers: headers, body: JSON.stringify({ csv: text }) });
-      var body = null;
-      try { body = await res.json(); } catch (e) { /* ignore */ }
-      if (!res.ok) throw new Error((body && body.message) || (body && body.error) || ("http_" + res.status));
+      var res, body, attempt = 0;
+      var ORDERS_BACKOFF_S = [25, 35, 45, 60, 60, 60];
+      while (true) {
+        ordersResult.className = "ordersresult";
+        ordersResult.textContent = "Importing " + file.name + "…";
+        res = await fetch("/api/import-orders", { method: "POST", headers: headers, body: JSON.stringify({ csv: text }) });
+        body = null;
+        try { body = await res.json(); } catch (e) { /* ignore */ }
+        if (res.status !== 429 || attempt >= ORDERS_BACKOFF_S.length) break;
+        // Google Sheets is briefly over its per-minute limit (usually while
+        // an invoice batch is saving) — wait it out with a visible countdown.
+        var waitS = Math.max(ORDERS_BACKOFF_S[attempt], (body && body.retryAfter) || 0);
+        attempt += 1;
+        var until = Date.now() + waitS * 1000;
+        ordersResult.className = "ordersresult err";
+        await new Promise(function(resolve){
+          function tick(){
+            var left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+            ordersResult.textContent = "Google Sheets busy — retrying the import automatically in " + left + "s (attempt " + (attempt + 1) + " of " + (ORDERS_BACKOFF_S.length + 1) + "). Keep this page open.";
+            if (left <= 0) { clearInterval(t); resolve(); }
+          }
+          var t = setInterval(tick, 1000);
+          tick();
+        });
+      }
+      if (!res.ok) throw new Error(res.status === 429 ? "Google Sheets is still busy after several retries — try again in a couple of minutes" : ((body && body.message) || (body && body.error) || ("http_" + res.status)));
 
       // The server does the aggregating AND the "All orders" tab upsert in
       // one round trip now — orders never touch this page's row table at
